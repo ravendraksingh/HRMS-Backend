@@ -1,6 +1,6 @@
 # Database Migrations
 
-This directory contains database migration scripts for the EMS Backend multi-tenant system.
+This directory contains database migration scripts for the HRMS Backend (Human Resource Management System - Backend) multi-tenant system.
 
 ## Migration 001: Rename employee_id to employee_code
 

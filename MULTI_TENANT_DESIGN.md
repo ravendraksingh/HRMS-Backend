@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document explains the multi-tenant database design strategy implemented for the EMS Backend system, which supports multiple organizations in a single database instance.
+This document explains the multi-tenant database design strategy implemented for the HRMS Backend (Human Resource Management System - Backend) system, which supports multiple organizations in a single database instance.
 
 ## Design Strategy: Shared Database, Shared Schema
 

@@ -1,6 +1,6 @@
 # Database Setup Instructions
 
-This document provides instructions for setting up the EMS Backend database from scratch using the consolidated schema files.
+This document provides instructions for setting up the HRMS Backend (Human Resource Management System - Backend) database from scratch using the consolidated schema files.
 
 ## Overview
 
@@ -27,26 +27,26 @@ These files contain all tables, indexes, constraints, and relationships in the c
 
 ### Step 1: Create Database
 
-```bash
-mysql -u root -p
-```
+   ```bash
+   mysql -u root -p
+   ```
 
 ```sql
-CREATE DATABASE ems_backend CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE ems_backend;
+CREATE DATABASE hrms_backend CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE hrms_backend;
 EXIT;
 ```
 
 ### Step 2: Run Schema File
 
 ```bash
-mysql -u your_user -p ems_backend < sql/01_setup_mysql.sql
+mysql -u your_user -p hrms_backend < sql/01_setup_mysql.sql
 ```
 
 Or from within MySQL:
 
 ```sql
-USE ems_backend;
+USE hrms_backend;
 SOURCE sql/01_setup_mysql.sql;
 ```
 
@@ -67,21 +67,21 @@ psql -U postgres
 ```
 
 ```sql
-CREATE DATABASE ems_backend;
-\c ems_backend
+CREATE DATABASE hrms_backend;
+\c hrms_backend
 \q
 ```
 
 ### Step 2: Run Schema File
 
 ```bash
-psql -U your_user -d ems_backend -f sql/01_setup_postgresql.sql
+psql -U your_user -d hrms_backend -f sql/01_setup_postgresql.sql
 ```
 
 Or from within psql:
 
 ```sql
-\c ems_backend
+\c hrms_backend
 \i sql/01_setup_postgresql.sql
 ```
 
@@ -237,7 +237,7 @@ After setting up the database:
      host: process.env.DB_HOST || "localhost",
      user: process.env.DB_USER || "root",
      password: process.env.DB_PASSWORD || "password",
-     database: process.env.DB_NAME || "ems_backend",
+     database: process.env.DB_NAME || "hrms_backend",
    };
    ```
 

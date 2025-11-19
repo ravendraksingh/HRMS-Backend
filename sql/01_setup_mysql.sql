@@ -1,5 +1,6 @@
 -- ============================================================================
--- EMS Backend - Complete MySQL Database Schema
+-- HRMS Backend - Complete MySQL Database Schema
+-- Human Resource Management System - Backend
 -- ============================================================================
 -- This file contains the complete database schema for MySQL 8.0+
 -- Run this file to set up a fresh database from scratch

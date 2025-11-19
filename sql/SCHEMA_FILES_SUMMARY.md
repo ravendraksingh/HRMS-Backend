@@ -83,19 +83,19 @@ Both schemas create **23 tables**:
 ### Quick Start (MySQL)
 ```bash
 mysql -u root -p
-CREATE DATABASE ems_backend CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE hrms_backend CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 EXIT;
 
-mysql -u your_user -p ems_backend < sql/01_setup_mysql.sql
+mysql -u your_user -p hrms_backend < sql/01_setup_mysql.sql
 ```
 
 ### Quick Start (PostgreSQL)
 ```bash
 psql -U postgres
-CREATE DATABASE ems_backend;
+CREATE DATABASE hrms_backend;
 \q
 
-psql -U your_user -d ems_backend -f sql/01_setup_postgresql.sql
+psql -U your_user -d hrms_backend -f sql/01_setup_postgresql.sql
 ```
 
 ## Migration Notes

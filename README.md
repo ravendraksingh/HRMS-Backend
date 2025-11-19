@@ -1,6 +1,33 @@
-# EMS Backend
+# HRMS Backend
 
-A comprehensive Employee Management System (EMS) backend built with Node.js, Express.js, and MySQL. This system supports multi-tenant architecture, allowing multiple organizations to use the same application instance with complete data isolation.
+**Human Resource Management System - Backend**
+
+A comprehensive Human Resource Management System (HRMS) backend built with Node.js, Express.js, and MySQL. This system supports multi-tenant architecture, allowing multiple organizations to use the same application instance with complete data isolation.
+
+## Table of Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Project Structure](#project-structure)
+- [API Documentation](#api-documentation)
+  - [Authentication](#authentication)
+  - [Employees](#employees)
+  - [Manager Dashboard](#manager-dashboard)
+  - [Attendance](#attendance)
+  - [Leaves](#leaves)
+  - [Health Check](#health-check)
+- [Environment Variables](#environment-variables)
+- [Logging](#logging)
+- [Database Design](#database-design)
+- [Testing](#testing)
+- [Development](#development)
+- [Security](#security)
+- [Contributing](#contributing)
+- [License](#license)
+- [Author](#author)
+- [Support](#support)
 
 ## Features
 
@@ -17,7 +44,7 @@ A comprehensive Employee Management System (EMS) backend built with Node.js, Exp
 
 - **Runtime**: Node.js
 - **Framework**: Express.js 5.x
-- **Database**: MySQL 8.0+
+- **Database**: MySQL 8.0+ / PostgreSQL 12+
 - **Authentication**: JWT (JSON Web Tokens)
 - **Logging**: Winston with daily log rotation
 - **Password Hashing**: bcrypt
@@ -25,15 +52,15 @@ A comprehensive Employee Management System (EMS) backend built with Node.js, Exp
 ## Prerequisites
 
 - Node.js (v14 or higher)
-- MySQL 8.0 or higher
+- MySQL 8.0+ or PostgreSQL 12+
 - npm or yarn
 
 ## Installation
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
-   cd ems-backend
+   git clone https://github.com/ravendraksingh/HRMS-Backend.git
+   cd HRMS-Backend
    ```
 
 2. **Install dependencies**
@@ -53,7 +80,7 @@ A comprehensive Employee Management System (EMS) backend built with Node.js, Exp
    DB_PORT=3306
    DB_USER=your_db_user
    DB_PASSWORD=your_db_password
-   DB_NAME=ems_backend
+   DB_NAME=hrms_backend
    
    # Server Configuration
    PORT=8080
@@ -119,7 +146,7 @@ A comprehensive Employee Management System (EMS) backend built with Node.js, Exp
 ## Project Structure
 
 ```
-ems-backend/
+HRMS-Backend/
 ├── config/
 │   └── logger.js              # Winston logger configuration
 ├── middlewares/
@@ -132,20 +159,20 @@ ems-backend/
 │   ├── admin/                 # Admin routes
 │   ├── attendance/            # Attendance management routes
 │   ├── auth/                  # Authentication routes
-│   ├── departments/           # Department management routes
+│   ├── departments/          # Department management routes
 │   ├── employees/             # Employee management routes
 │   ├── managers/              # Manager dashboard routes
 │   ├── onboarding/            # Employee onboarding routes
 │   ├── organization/          # Organization routes
 │   ├── organizations/         # Organization management
 │   ├── status/                # Health check routes
-│   └── users/                 # User management routes
+│   └── users/                  # User management routes
 ├── sql/
 │   ├── migrations/            # Database migrations
 │   ├── attendance/            # Attendance schema
 │   ├── departments/           # Department schema
 │   ├── employees/             # Employee schema
-│   ├── organizations/         # Organization schema
+│   ├── organizations/          # Organization schema
 │   └── users/                 # User schema
 ├── util/
 │   ├── ApiError.js            # Custom error class
@@ -315,4 +342,4 @@ For issues and questions, please refer to the documentation files:
 - `MULTI_TENANT_DESIGN.md` - Database design
 - `MANAGER_TEAM_DASHBOARD_APIS.md` - Manager API documentation
 - `sql/migrations/README.md` - Database migrations
-
+- `sql/SETUP_INSTRUCTIONS.md` - Database setup instructions

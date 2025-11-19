@@ -74,7 +74,7 @@ if (process.env.NODE_ENV === 'production' || process.env.ENABLE_FILE_LOGGING ===
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
   format: logFormat,
-  defaultMeta: { service: 'ems-backend' },
+  defaultMeta: { service: 'hrms-backend' },
   transports: transports,
   // Don't exit on handled exceptions
   exitOnError: false,

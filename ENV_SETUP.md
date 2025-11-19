@@ -1,6 +1,6 @@
 # Environment Variables Setup
 
-This document describes the required environment variables for the EMS Backend application.
+This document describes the required environment variables for the HRMS Backend (Human Resource Management System - Backend) application.
 
 ## Required Environment Variables
 

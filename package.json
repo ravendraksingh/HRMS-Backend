@@ -1,7 +1,7 @@
 {
-  "name": "ems-backend",
+  "name": "hrms-backend",
   "version": "1.0.0",
-  "description": "EMS Backend",
+  "description": "Human Resource Management System - Backend",
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",

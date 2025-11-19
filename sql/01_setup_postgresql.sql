@@ -1,5 +1,6 @@
 -- ============================================================================
--- EMS Backend - Complete PostgreSQL Database Schema
+-- HRMS Backend - Complete PostgreSQL Database Schema
+-- Human Resource Management System - Backend
 -- ============================================================================
 -- This file contains the complete database schema for PostgreSQL 12+
 -- Run this file to set up a fresh database from scratch
