@@ -329,15 +329,37 @@ This uses `nodemon` for automatic server restart on file changes.
 
 ## License
 
-ISC
+Copyright (c) 2024 Niyava. All rights reserved.
+
+This software and associated documentation files (the "Software") are proprietary and confidential. Unauthorized copying, modification, distribution, or use of this Software, via any medium, is strictly prohibited without the express written permission of Niyava.
+
+### Proprietary License
+
+- This software is proprietary and not open source
+- Redistribution is not permitted
+- Modification is not permitted without authorization
+- Commercial use is restricted to authorized parties only
+- All rights are reserved by Niyava
+
+For licensing inquiries, please contact: ravendra@niyava.com
 
 ## Author
 
-Ravendra Singh
+Ravendra Kumar Singh
 
 ## Support
 
-For issues and questions, please refer to the documentation files:
+For support, inquiries, or questions, please contact:
+
+**Ravendra Kumar Singh**  
+Email: ravendra@niyava.com  
+Website: https://niyava.com
+
+You can also open an issue in the repository for bug reports or feature requests.
+
+### Documentation
+
+For technical documentation, please refer to:
 - `ENV_SETUP.md` - Environment setup
 - `MULTI_TENANT_DESIGN.md` - Database design
 - `MANAGER_TEAM_DASHBOARD_APIS.md` - Manager API documentation
