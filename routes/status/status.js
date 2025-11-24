@@ -2,7 +2,6 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const logger = require("../../config/logger");
 
 /**
  * GET /status
@@ -31,11 +30,6 @@ router.get("/", async (req, res) => {
     });
   } catch (error) {
     // Database connection failed
-    logger.error("Database connection check failed", {
-      error: error.message,
-      stack: error.stack,
-    });
-
     res.status(503).json({
       status: "error",
       database: "disconnected",
@@ -83,11 +77,6 @@ router.get("/detailed", async (req, res) => {
       message: "Service is healthy",
     });
   } catch (error) {
-    logger.error("Detailed health check failed", {
-      error: error.message,
-      stack: error.stack,
-    });
-
     res.status(503).json({
       status: "error",
       database: {

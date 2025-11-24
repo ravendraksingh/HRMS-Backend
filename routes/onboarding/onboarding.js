@@ -5,8 +5,6 @@ const pool = require("../../db");
 const ApiError = require("../../util/ApiError");
 const bcrypt = require("bcrypt");
 const { 
-  resolveEmployeeNumericId, 
-  resolveDepartmentNumericId,
   validateHrManagerForDepartment,
   getHrManagersForDepartment,
   autoAssignHrManager
@@ -35,9 +33,7 @@ router.post("/", async (req, res, next) => {
     password, // Required if create_user_account is true
     role_ids = [], // Optional array of role IDs
   } = req.body;
-  const organization_id = req.organizationId;
-
-  try {
+    try {
     // Validate required fields
     if (!employee_code || !name || !email || !department) {
       throw new ApiError(
@@ -58,8 +54,8 @@ router.post("/", async (req, res, next) => {
 
     // Check if employee_code already exists in organization
     const [[existingEmployee]] = await pool.query(
-      "SELECT id FROM employees WHERE organization_id = ? AND employee_code = ?",
-      [organization_id, employee_code]
+      "SELECT id FROM employees WHERE employee_code = ?",
+      [ employee_code]
     );
     if (existingEmployee) {
       throw new ApiError(
@@ -69,12 +65,12 @@ router.post("/", async (req, res, next) => {
     }
 
     // Resolve department ID (can be numeric ID or department_code)
-    const departmentId = await resolveDepartmentNumericId(department, organization_id);
+    const departmentId = department;
 
     // Validate department exists
     const [[dept]] = await pool.query(
-      "SELECT id, department_head FROM departments WHERE id = ? AND organization_id = ?",
-      [departmentId, organization_id]
+      "SELECT id, department_head FROM departments WHERE id = ?",
+      [departmentId]
     );
     if (!dept) {
       throw new ApiError(
@@ -86,12 +82,12 @@ router.post("/", async (req, res, next) => {
     // Resolve manager ID if provided
     let managerId = null;
     if (manager) {
-      managerId = await resolveEmployeeNumericId(manager, organization_id);
+      managerId = manager;
       
       // Validate manager exists and belongs to organization
       const [[mgr]] = await pool.query(
-        "SELECT id FROM employees WHERE id = ? AND organization_id = ?",
-        [managerId, organization_id]
+        "SELECT id FROM employees WHERE id = ?",
+        [managerId]
       );
       if (!mgr) {
         throw new ApiError(
@@ -104,12 +100,12 @@ router.post("/", async (req, res, next) => {
     // Resolve HR manager ID if provided
     let hrManagerId = null;
     if (hr_manager) {
-      hrManagerId = await resolveEmployeeNumericId(hr_manager, organization_id);
+      hrManagerId = hr_manager;
       
       // Validate HR manager exists and belongs to organization
       const [[hrMgr]] = await pool.query(
-        "SELECT id FROM employees WHERE id = ? AND organization_id = ?",
-        [hrManagerId, organization_id]
+        "SELECT id FROM employees WHERE id = ?",
+        [hrManagerId]
       );
       if (!hrMgr) {
         throw new ApiError(
@@ -121,8 +117,7 @@ router.post("/", async (req, res, next) => {
       // Validate HR manager belongs to department
       const isValid = await validateHrManagerForDepartment(
         hrManagerId,
-        departmentId,
-        organization_id
+        departmentId
       );
       
       if (!isValid) {
@@ -133,7 +128,7 @@ router.post("/", async (req, res, next) => {
       }
     } else {
       // Auto-assign HR manager if department has exactly one
-      const autoAssignedId = await autoAssignHrManager(null, departmentId, organization_id);
+      const autoAssignedId = await autoAssignHrManager(null, departmentId);
       if (autoAssignedId) {
         hrManagerId = autoAssignedId;
       }
@@ -142,8 +137,8 @@ router.post("/", async (req, res, next) => {
     // Validate location if provided
     if (location_id) {
       const [[loc]] = await pool.query(
-        "SELECT id FROM office_locations WHERE id = ? AND organization_id = ?",
-        [location_id, organization_id]
+        "SELECT id FROM office_locations WHERE id = ?",
+        [location_id]
       );
       if (!loc) {
         throw new ApiError(
@@ -160,9 +155,9 @@ router.post("/", async (req, res, next) => {
     try {
       // Step 1: Create employee
       const [employeeResult] = await connection.query(
-        "INSERT INTO employees (organization_id, employee_code, name, email, manager_id, hr_manager_id, department_id, location_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO employees ( employee_code, name, email, manager_id, hr_manager_id, department_id, location_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         [
-          organization_id,
+          
           employee_code,
           name,
           email,
@@ -178,8 +173,8 @@ router.post("/", async (req, res, next) => {
       // Step 2: Set as department head if no head exists
       if (!dept.department_head) {
         await connection.query(
-          "UPDATE departments SET department_head = ? WHERE id = ? AND organization_id = ?",
-          [employeeId, departmentId, organization_id]
+          "UPDATE departments SET department_head = ? WHERE id = ?",
+          [employeeId, departmentId]
         );
       }
 
@@ -188,8 +183,8 @@ router.post("/", async (req, res, next) => {
       if (create_user_account) {
         // Check if username already exists in organization
         const [[existingUser]] = await connection.query(
-          "SELECT id FROM users WHERE organization_id = ? AND username = ?",
-          [organization_id, username]
+          "SELECT id FROM users WHERE username = ?",
+          [ username]
         );
         if (existingUser) {
           throw new ApiError("Username already exists in this organization", 409);
@@ -201,8 +196,8 @@ router.post("/", async (req, res, next) => {
 
         // Insert user
         const [userResult] = await connection.query(
-          "INSERT INTO users (organization_id, username, password, employee_id, is_active) VALUES (?, ?, ?, ?, ?)",
-          [organization_id, username, hashedPassword, employeeId, 1]
+          "INSERT INTO users ( username, password, employee_id, is_active) VALUES (?, ?, ?, ?, ?)",
+          [ username, hashedPassword, employeeId, 1]
         );
 
         userId = userResult.insertId;
@@ -212,8 +207,8 @@ router.post("/", async (req, res, next) => {
           // Validate all role IDs belong to organization
           const placeholders = role_ids.map(() => "?").join(",");
           const [roles] = await connection.query(
-            `SELECT id FROM roles WHERE id IN (${placeholders}) AND organization_id = ?`,
-            [...role_ids, organization_id]
+            `SELECT id FROM roles WHERE id IN (${placeholders})`,
+            [...role_ids]
           );
           
           if (roles.length !== role_ids.length) {
@@ -251,8 +246,8 @@ router.post("/", async (req, res, next) => {
         LEFT JOIN office_locations loc ON e.location_id = loc.id
         LEFT JOIN employees m ON e.manager_id = m.id
         LEFT JOIN employees hr ON e.hr_manager_id = hr.id
-        WHERE e.id = ? AND e.organization_id = ?`,
-        [employeeId, organization_id]
+        WHERE e.id = ?`,
+        [employeeId]
       );
 
       // Build response
@@ -332,20 +327,17 @@ router.post("/", async (req, res, next) => {
 router.patch("/:employee_id", async (req, res, next) => {
   const { department, manager, hr_manager, location_id, set_as_department_head = false } =
     req.body;
-  const organization_id = req.organizationId;
-  const employeeIdParam = req.params.employee_id;
+    const employeeIdParam = req.params.employee_id;
 
   try {
     // Resolve employee ID
-    const employeeId = await resolveEmployeeNumericId(
-      employeeIdParam,
-      organization_id
-    );
+    const employeeId = employeeIdParam
+    ;
 
     // Verify employee exists and belongs to organization
     const [[employee]] = await pool.query(
-      "SELECT id, department_id, hr_manager_id FROM employees WHERE id = ? AND organization_id = ?",
-      [employeeId, organization_id]
+      "SELECT id, department_id, hr_manager_id FROM employees WHERE id = ?",
+      [employeeId]
     );
     if (!employee) {
       throw new ApiError("Employee not found", 404);
@@ -364,10 +356,8 @@ router.patch("/:employee_id", async (req, res, next) => {
         if (manager === null) {
           updates.push("manager_id = NULL");
         } else {
-          const managerId = await resolveEmployeeNumericId(
-            manager,
-            organization_id
-          );
+          const managerId = manager
+          ;
           updates.push("manager_id = ?");
           params.push(managerId);
         }
@@ -378,14 +368,12 @@ router.patch("/:employee_id", async (req, res, next) => {
         if (hr_manager === null) {
           updates.push("hr_manager_id = NULL");
         } else {
-          const hrManagerId = await resolveEmployeeNumericId(
-            hr_manager,
-            organization_id
-          );
+          const hrManagerId = hr_manager
+          ;
           // Validate HR manager exists
           const [[hrMgr]] = await connection.query(
-            "SELECT id FROM employees WHERE id = ? AND organization_id = ?",
-            [hrManagerId, organization_id]
+            "SELECT id FROM employees WHERE id = ?",
+            [hrManagerId]
           );
           if (!hrMgr) {
             throw new ApiError(
@@ -396,7 +384,7 @@ router.patch("/:employee_id", async (req, res, next) => {
           
           // Get the department (current or new)
           const currentDeptId = department !== undefined
-            ? await resolveDepartmentNumericId(department, organization_id)
+            ? department
             : employee.department_id;
           
           if (!currentDeptId) {
@@ -409,8 +397,7 @@ router.patch("/:employee_id", async (req, res, next) => {
           // Validate HR manager belongs to department
           const isValid = await validateHrManagerForDepartment(
             hrManagerId,
-            currentDeptId,
-            organization_id
+            currentDeptId
           );
           
           if (!isValid) {
@@ -427,19 +414,18 @@ router.patch("/:employee_id", async (req, res, next) => {
       
       // Handle department change - validate/update HR manager
       if (department !== undefined) {
-        const newDeptId = await resolveDepartmentNumericId(department, organization_id);
+        const newDeptId = department;
         
         // If employee has HR manager and it's not being explicitly changed, validate it
         if (hr_manager === undefined && employee.hr_manager_id) {
           const isValid = await validateHrManagerForDepartment(
             employee.hr_manager_id,
-            newDeptId,
-            organization_id
+            newDeptId
           );
           
           if (!isValid) {
             // Try to auto-assign if only one HR manager in new department
-            const hrManagers = await getHrManagersForDepartment(newDeptId, organization_id);
+            const hrManagers = await getHrManagersForDepartment(newDeptId);
             if (hrManagers.length === 1) {
               updates.push("hr_manager_id = ?");
               params.push(hrManagers[0].id);
@@ -460,8 +446,8 @@ router.patch("/:employee_id", async (req, res, next) => {
         } else {
           // Validate location
           const [[loc]] = await connection.query(
-            "SELECT id FROM office_locations WHERE id = ? AND organization_id = ?",
-            [location_id, organization_id]
+            "SELECT id FROM office_locations WHERE id = ?",
+            [location_id]
           );
           if (!loc) {
             throw new ApiError(
@@ -478,15 +464,15 @@ router.patch("/:employee_id", async (req, res, next) => {
       if (updates.length > 0) {
         params.push(employeeId);
         await connection.query(
-          `UPDATE employees SET ${updates.join(", ")} WHERE id = ? AND organization_id = ?`,
-          [...params, organization_id]
+          `UPDATE employees SET ${updates.join(", ")} WHERE id = ?`,
+          [...params]
         );
       }
 
       // Set as department head if requested
       if (set_as_department_head) {
         const currentDeptId = department !== undefined
-          ? await resolveDepartmentNumericId(department, organization_id)
+          ? department
           : employee.department_id;
 
         if (!currentDeptId) {
@@ -497,8 +483,8 @@ router.patch("/:employee_id", async (req, res, next) => {
         }
 
         await connection.query(
-          "UPDATE departments SET department_head = ? WHERE id = ? AND organization_id = ?",
-          [employeeId, currentDeptId, organization_id]
+          "UPDATE departments SET department_head = ? WHERE id = ?",
+          [employeeId, currentDeptId]
         );
       }
 
@@ -521,8 +507,8 @@ router.patch("/:employee_id", async (req, res, next) => {
         LEFT JOIN office_locations loc ON e.location_id = loc.id
         LEFT JOIN employees m ON e.manager_id = m.id
         LEFT JOIN employees hr ON e.hr_manager_id = hr.id
-        WHERE e.id = ? AND e.organization_id = ?`,
-        [employeeId, organization_id]
+        WHERE e.id = ?`,
+        [employeeId]
       );
 
       res.json({

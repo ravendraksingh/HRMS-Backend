@@ -3,28 +3,20 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../util/ApiError");
-const { resolveEmployeeNumericId } = require("../../util/employeeUtil");
 
-// Get all departments for the organization
+// Get all departments
 router.get("/", async (req, res, next) => {
-  const organization_id = req.organizationId;
-
   try {
     const [rows] = await pool.query(
       `SELECT 
-        d.id, 
-        d.department_code, 
+        d.deptid, 
+        d.short_name,
         d.name, 
-        d.department_head,
         e.name as department_head_name,
-        e.employee_code as department_head_employee_code,
-        d.created_at, 
-        d.updated_at 
+        e.empid as department_head_empid
       FROM departments d
-      LEFT JOIN employees e ON d.department_head = e.id
-      WHERE d.organization_id = ? 
-      ORDER BY d.name`,
-      [organization_id]
+      LEFT JOIN employees e ON d.department_head_empid = e.empid
+      ORDER BY d.name`
     );
 
     res.json({ departments: rows });
@@ -33,52 +25,27 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// Get department by ID or department_code
-router.get("/:identifier", async (req, res, next) => {
-  const identifier = req.params.identifier;
-  const organization_id = req.organizationId;
-
+router.get("/:deptid", async (req, res, next) => {
+  const deptid = req.params.deptid;
+  if (!deptid) {
+    throw new ApiError("Department ID is required", 400);
+  }
   try {
-    let department = null;
-
-    // Check if identifier is numeric (id) or VARCHAR (department_code)
-    if (/^\d+$/.test(identifier)) {
-      // It's numeric, query by id
-      const [[dept]] = await pool.query(
-        `SELECT 
-          d.id, 
-          d.department_code, 
-          d.name, 
-          d.department_head,
+    const [[department]] = await pool.query(
+      `SELECT 
+          d.deptid, 
+          d.name,
+          d.short_name,
+          d.department_head_empid,
           e.name as department_head_name,
-          e.employee_code as department_head_employee_code,
+          e.empid as department_head_empid,
           d.created_at, 
           d.updated_at 
         FROM departments d
-        LEFT JOIN employees e ON d.department_head = e.id
-        WHERE d.id = ? AND d.organization_id = ?`,
-        [identifier, organization_id]
-      );
-      department = dept;
-    } else {
-      // It's VARCHAR department_code, query by code
-      const [[dept]] = await pool.query(
-        `SELECT 
-          d.id, 
-          d.department_code, 
-          d.name, 
-          d.department_head,
-          e.name as department_head_name,
-          e.employee_code as department_head_employee_code,
-          d.created_at, 
-          d.updated_at 
-        FROM departments d
-        LEFT JOIN employees e ON d.department_head = e.id
-        WHERE d.department_code = ? AND d.organization_id = ?`,
-        [identifier, organization_id]
-      );
-      department = dept;
-    }
+        LEFT JOIN employees e ON d.department_head_empid = e.empid
+        WHERE d.deptid = ?`,
+      [deptid]
+    );
 
     if (!department) {
       throw new ApiError("Department not found", 404);
@@ -90,211 +57,234 @@ router.get("/:identifier", async (req, res, next) => {
   }
 });
 
-// Create department
+/**
+ * POST /departments
+ * Create a new department
+ */
 router.post("/", async (req, res, next) => {
-  const { department_code, name } = req.body;
-  const organization_id = req.organizationId;
+  const { deptid, name, short_name, department_head_empid } = req.body;
 
   try {
-    if (!department_code || !name) {
-      throw new ApiError("department_code and name are required", 400);
+    if (!deptid || !name) {
+      throw new ApiError("deptid and name are required", 400);
     }
 
-    // Check if department_code already exists in organization
+    // Validate deptid length (VARCHAR(10))
+    if (deptid.length > 10) {
+      throw new ApiError("deptid must be 10 characters or less", 400);
+    }
+
+    // Check if deptid already exists
     const [[existing]] = await pool.query(
-      "SELECT id FROM departments WHERE organization_id = ? AND department_code = ?",
-      [organization_id, department_code]
+      "SELECT deptid FROM departments WHERE deptid = ?",
+      [deptid.toUpperCase()]
     );
 
     if (existing) {
+      throw new ApiError("Department ID already exists", 409);
+    }
+
+    // Check if name already exists (unique constraint)
+    const [[existingName]] = await pool.query(
+      "SELECT deptid FROM departments WHERE name = ?",
+      [name]
+    );
+
+    if (existingName) {
       throw new ApiError(
-        "Department code already exists in this organization",
+        `Department with name '${name}' already exists`,
         409
       );
     }
 
-    // Insert department (id is auto-generated)
-    const [result] = await pool.query(
-      "INSERT INTO departments (organization_id, department_code, name) VALUES (?, ?, ?)",
-      [organization_id, department_code, name]
+    // Validate department_head_id if provided
+    if (department_head_empid) {
+      const [[employee]] = await pool.query(
+        "SELECT empid FROM employees WHERE empid = ?",
+        [department_head_empid]
+      );
+      if (!employee) {
+        throw new ApiError("Department head employee not found", 404);
+      }
+    }
+
+    // Insert department
+    await pool.query(
+      "INSERT INTO departments (deptid, name, short_name, department_head_empid) VALUES (?, ?, ?, ?)",
+      [deptid.toUpperCase(), name, short_name || null, department_head_empid || null]
     );
 
     // Fetch created department
     const [[department]] = await pool.query(
       `SELECT 
-        d.id, 
-        d.department_code, 
-        d.name, 
-        d.department_head,
+        d.deptid, 
+        d.name,
+        d.short_name,
+        d.department_head_empid,
         e.name as department_head_name,
-        e.employee_code as department_head_employee_code,
-        d.created_at, 
-        d.updated_at 
+        e.empid as department_head_empid
       FROM departments d
-      LEFT JOIN employees e ON d.department_head = e.id
-      WHERE d.id = ?`,
-      [result.insertId]
+      LEFT JOIN employees e ON d.department_head_empid = e.empid
+      WHERE d.deptid = ?`,
+      [deptid.toUpperCase()]
     );
 
-    res.status(201).json(department);
+    res.status(201).json({
+      message: "Department created successfully",
+      department,
+    });
   } catch (error) {
     next(error);
   }
 });
 
-// Update department by ID
-router.patch("/:id", async (req, res, next) => {
-  const departmentId = req.params.id;
-  const { department_code, name, department_head } = req.body;
-  const organization_id = req.organizationId;
+/**
+ * PATCH /departments/:deptid
+ * Update a department
+ */
+router.patch("/:deptid", async (req, res, next) => {
+  const deptid = req.params.deptid;
+  const { name, short_name, department_head_empid } = req.body;
 
   try {
-    // Validate department ID is numeric
-    const id = parseInt(departmentId, 10);
-    if (isNaN(id) || id <= 0) {
-      throw new ApiError("Invalid department ID", 400);
-    }
-
     // Check if department exists
     const [[dept]] = await pool.query(
-      "SELECT id FROM departments WHERE id = ? AND organization_id = ?",
-      [id, organization_id]
+      "SELECT deptid FROM departments WHERE deptid = ?",
+      [deptid.toUpperCase()]
     );
     if (!dept) {
       throw new ApiError("Department not found", 404);
-    }
-
-    // Check if new department_code conflicts with existing one
-    if (department_code) {
-      const [[existing]] = await pool.query(
-        "SELECT id FROM departments WHERE organization_id = ? AND department_code = ? AND id != ?",
-        [organization_id, department_code, id]
-      );
-      if (existing) {
-        throw new ApiError(
-          "Department code already exists in this organization",
-          409
-        );
-      }
     }
 
     // Build update query
     const updates = [];
     const params = [];
 
-    if (department_code !== undefined) {
-      updates.push("department_code = ?");
-      params.push(department_code);
-    }
     if (name !== undefined) {
+      // Check if new name conflicts with existing name
+      const [[nameConflict]] = await pool.query(
+        "SELECT deptid FROM departments WHERE name = ? AND deptid != ?",
+        [name, deptid.toUpperCase()]
+      );
+
+      if (nameConflict) {
+        throw new ApiError(
+          `Department with name '${name}' already exists`,
+          409
+        );
+      }
+
       updates.push("name = ?");
       params.push(name);
     }
 
-    // Handle department_head update
-    if (department_head !== undefined) {
-      if (department_head === null || department_head === "") {
-        // Clear department head
-        updates.push("department_head = NULL");
-      } else {
-        // Resolve employee ID (supports both numeric ID and employee_code)
-        const headEmployeeId = await resolveEmployeeNumericId(
-          department_head,
-          organization_id
-        );
+    if (short_name !== undefined) {
+      updates.push("short_name = ?");
+      params.push(short_name || null);
+    }
 
-        // Validate employee exists and belongs to organization
+    // Handle department_head_id update
+    if (department_head_empid !== undefined) {
+      if (department_head_empid === null) {
+        // Clear department head
+        updates.push("department_head_empid = NULL");
+      } else {
+        // Validate employee exists
         const [[employee]] = await pool.query(
-          "SELECT id, department_id FROM employees WHERE id = ? AND organization_id = ?",
-          [headEmployeeId, organization_id]
+          "SELECT empid FROM employees WHERE empid = ?",
+          [department_head_empid]
         );
         if (!employee) {
-          throw new ApiError(
-            "Employee not found or doesn't belong to organization",
-            404
-          );
+          throw new ApiError("Employee not found", 404);
         }
 
-        // Optional: Validate employee belongs to this department
-        // Uncomment if you want to enforce that department head must be in the department
-        // if (employee.department_id !== id) {
-        //   throw new ApiError(
-        //     "Department head must be an employee of this department",
-        //     400
-        //   );
-        // }
-
-        updates.push("department_head = ?");
-        params.push(headEmployeeId);
+        updates.push("department_head_empid = ?");
+        params.push(department_head_empid);
       }
     }
 
-    if (updates.length > 0) {
-      params.push(id, organization_id);
-      await pool.query(
-        `UPDATE departments SET ${updates.join(", ")} WHERE id = ? AND organization_id = ?`,
-        params
-      );
+    if (updates.length === 0) {
+      throw new ApiError("No fields to update", 400);
     }
+
+    params.push(deptid.toUpperCase());
+    await pool.query(
+      `UPDATE departments SET ${updates.join(", ")} WHERE deptid = ?`,
+      params
+    );
 
     // Fetch updated department
     const [[department]] = await pool.query(
       `SELECT 
-        d.id, 
-        d.department_code, 
-        d.name, 
-        d.department_head,
+        d.deptid, 
+        d.name,
+        d.short_name,
+        d.department_head_empid,
         e.name as department_head_name,
-        e.employee_code as department_head_employee_code,
+        e.empid as department_head_empid,
         d.created_at, 
         d.updated_at 
       FROM departments d
-      LEFT JOIN employees e ON d.department_head = e.id
-      WHERE d.id = ? AND d.organization_id = ?`,
-      [id, organization_id]
+      LEFT JOIN employees e ON d.department_head_empid = e.empid
+      WHERE d.deptid = ?`,
+      [deptid.toUpperCase()]
     );
 
-    res.json(department);
+    res.json({
+      message: "Department updated successfully",
+      department,
+    });
   } catch (error) {
     next(error);
   }
 });
 
-// Delete department by ID
-router.delete("/:id", async (req, res, next) => {
-  const departmentId = req.params.id;
-  const organization_id = req.organizationId;
+/**
+ * DELETE /departments/:deptid
+ * Delete a department
+ * Note: Check if department is in use before deleting
+ */
+router.delete("/:deptid", async (req, res, next) => {
+  const deptid = req.params.deptid;
 
   try {
-    // Validate department ID is numeric
-    const id = parseInt(departmentId, 10);
-    if (isNaN(id) || id <= 0) {
-      throw new ApiError("Invalid department ID", 400);
-    }
-
-    // Check if department exists and belongs to organization
+    // Check if department exists
     const [[dept]] = await pool.query(
-      "SELECT id FROM departments WHERE id = ? AND organization_id = ?",
-      [id, organization_id]
+      "SELECT deptid FROM departments WHERE deptid = ?",
+      [deptid.toUpperCase()]
     );
     if (!dept) {
-      throw new ApiError("Department not found or access denied", 404);
+      throw new ApiError("Department not found", 404);
     }
 
-    // SECURITY: Include organization_id in DELETE to prevent cross-organization deletion
+    // Check if department is assigned to any employees
+    const [[inUse]] = await pool.query(
+    "SELECT COUNT(*) as count FROM employees WHERE department_id = ?",
+      [deptid.toUpperCase()]
+    );
+
+    if (inUse.count > 0) {
+      throw new ApiError(
+        `Cannot delete department. It is assigned to ${inUse.count} employee(s). Please reassign employees first.`,
+        400
+      );
+    }
+
+    // Delete department
     const [result] = await pool.query(
-      "DELETE FROM departments WHERE id = ? AND organization_id = ?",
-      [id, organization_id]
+      "DELETE FROM departments WHERE deptid = ?",
+      [deptid.toUpperCase()]
     );
 
     if (result.affectedRows === 0) {
-      throw new ApiError("Department not found or access denied", 404);
+      throw new ApiError("Failed to delete department", 500);
     }
 
-    res.json({ deleted: true });
+    res.json({ message: "Department deleted successfully" });
   } catch (error) {
     next(error);
   }
 });
 
 module.exports = router;
+

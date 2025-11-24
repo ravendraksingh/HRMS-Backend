@@ -2,102 +2,195 @@ const express = require("express");
 const router = express.Router({ mergeParams: true });
 const pool = require("../../db");
 const ApiError = require("../../util/ApiError");
-const { resolveEmployeeNumericId } = require("../../util/employeeUtil");
-const logger = require("../../config/logger");
 
 // Get personal details for an employee
-router.get("/employees/:employeeId/personal", async (req, res, next) => {
+router.get("/employees/:empid/personal", async (req, res, next) => {
   try {
-    const organization_id = req.organizationId;
-    const employeeNumericId = await resolveEmployeeNumericId(
-      req.params.employeeId,
-      organization_id
+    const empid = req.params.empid;
+    if (!empid) {
+      throw new ApiError("Employee ID is required", 400);
+    }
+    // Check if employee exists
+    const [[employee]] = await pool.query(
+      "SELECT empid FROM employees WHERE empid = ?",
+      [empid]
     );
+    if (!employee) {
+      throw new ApiError("Employee not found", 404);
+    }
 
-    const [rows] = await pool.query(
-      "SELECT * FROM employees_personal WHERE organization_id = ? AND employee_id = ?",
-      [organization_id, employeeNumericId]
+    const [[personalDetails]] = await pool.query(
+      "SELECT * FROM employee_personal_details WHERE empid = ?",
+      [empid]
     );
-    if (rows.length === 0) return res.json(null);
-    res.json(rows[0]);
+    
+    if (!personalDetails) {
+      throw new ApiError("Personal details not found", 404);
+    }
+    
+    res.json(personalDetails);
   } catch (err) {
     next(err);
   }
 });
 
 // Upsert personal details for an employee
-router.put("/employees/:employeeId/personal", async (req, res, next) => {
-  const employeeId = req.params.employeeId;
-  const organization_id = req.organizationId;
-  logger.debug("Update employee personal info", { employeeId, organization_id });
+router.put("/employees/:empid/personal", async (req, res, next) => {
+  const empid = req.params.empid;
   const {
-    dob,
+    phone,
+    alternate_phone,
+    date_of_birth,
     gender,
     marital_status,
-    phone_primary,
-    phone_secondary,
-    address_line1,
-    address_line2,
-    city,
-    state,
-    postal_code,
-    country,
+    blood_group,
     emergency_contact_name,
-    emergency_contact_relation,
     emergency_contact_phone,
+    emergency_contact_relation,
+    permanent_address_line1,
+    permanent_address_line2,
+    permanent_city,
+    permanent_state,
+    permanent_postal_code,
+    permanent_country,
+    current_address_line1,
+    current_address_line2,
+    current_city,
+    current_state,
+    current_postal_code,
+    current_country,
+    pan_number,
+    aadhaar_number,
+    passport_number,
+    passport_expiry,
+    driving_license_number,
+    driving_license_expiry,
   } = req.body;
 
   try {
-    const [existing] = await pool.query(
-      "SELECT id FROM employees_personal WHERE organization_id = ? AND employee_id = ?",
-      [organization_id, employeeId]
+    // Check if employee exists
+    const [[employee]] = await pool.query(
+      "SELECT empid FROM employees WHERE empid = ?",
+      [empid]
     );
-    if (existing.length === 0) {
-      const [result] = await pool.query(
-        "INSERT INTO employees_personal (organization_id, employee_id, dob, gender, marital_status, phone_primary, phone_secondary, address_line1, address_line2, city, state, postal_code, country, emergency_contact_name, emergency_contact_relation, emergency_contact_phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    if (!employee) {
+      throw new ApiError("Employee not found", 404);
+    }
+
+    // Check if personal details already exist
+    const [[existing]] = await pool.query(
+      "SELECT empid FROM employee_personal_details WHERE empid = ?",
+      [empid]
+    );
+
+    if (existing) {
+      // Update existing record
+      await pool.query(
+        `UPDATE employee_personal_details SET
+          phone = ?,
+          alternate_phone = ?,
+          date_of_birth = ?,
+          gender = ?,
+          marital_status = ?,
+          blood_group = ?,
+          emergency_contact_name = ?,
+          emergency_contact_phone = ?,
+          emergency_contact_relation = ?,
+          permanent_address_line1 = ?,
+          permanent_address_line2 = ?,
+          permanent_city = ?,
+          permanent_state = ?,
+          permanent_postal_code = ?,
+          permanent_country = ?,
+          current_address_line1 = ?,
+          current_address_line2 = ?,
+          current_city = ?,
+          current_state = ?,
+          current_postal_code = ?,
+          current_country = ?,
+          pan_number = ?,
+          aadhaar_number = ?,
+          passport_number = ?,
+          passport_expiry = ?,
+          driving_license_number = ?,
+          driving_license_expiry = ?
+        WHERE empid = ?`,
         [
-          organization_id,
-          employeeId,
-          dob || null,
+          phone || null,
+          alternate_phone || null,
+          date_of_birth || null,
           gender || null,
           marital_status || null,
-          phone_primary || null,
-          phone_secondary || null,
-          address_line1 || null,
-          address_line2 || null,
-          city || null,
-          state || null,
-          postal_code || null,
-          country || null,
+          blood_group || null,
           emergency_contact_name || null,
-          emergency_contact_relation || null,
           emergency_contact_phone || null,
-        ]
-      );
-      return res.status(201).json({ id: result.insertId });
-    } else {
-      await pool.query(
-        "UPDATE employees_personal SET dob = COALESCE(?, dob), gender = COALESCE(?, gender), marital_status = COALESCE(?, marital_status), phone_primary = COALESCE(?, phone_primary), phone_secondary = COALESCE(?, phone_secondary), address_line1 = COALESCE(?, address_line1), address_line2 = COALESCE(?, address_line2), city = COALESCE(?, city), state = COALESCE(?, state), postal_code = COALESCE(?, postal_code), country = COALESCE(?, country), emergency_contact_name = COALESCE(?, emergency_contact_name), emergency_contact_relation = COALESCE(?, emergency_contact_relation), emergency_contact_phone = COALESCE(?, emergency_contact_phone) WHERE organization_id = ? AND employee_id = ?",
-        [
-          dob,
-          gender,
-          marital_status,
-          phone_primary,
-          phone_secondary,
-          address_line1,
-          address_line2,
-          city,
-          state,
-          postal_code,
-          country,
-          emergency_contact_name,
-          emergency_contact_relation,
-          emergency_contact_phone,
-          organization_id,
-          employeeId,
+          emergency_contact_relation || null,
+          permanent_address_line1 || null,
+          permanent_address_line2 || null,
+          permanent_city || null,
+          permanent_state || null,
+          permanent_postal_code || null,
+          permanent_country || null,
+          current_address_line1 || null,
+          current_address_line2 || null,
+          current_city || null,
+          current_state || null,
+          current_postal_code || null,
+          current_country || null,
+          pan_number || null,
+          aadhaar_number || null,
+          passport_number || null,
+          passport_expiry || null,
+          driving_license_number || null,
+          driving_license_expiry || null,
+          empid,
         ]
       );
       return res.json({ updated: true });
+    } else {
+      // Insert new record
+      await pool.query(
+        `INSERT INTO employee_personal_details (
+          empid, phone, alternate_phone, date_of_birth, gender, marital_status,
+          blood_group, emergency_contact_name, emergency_contact_phone,
+          emergency_contact_relation, permanent_address_line1, permanent_address_line2,
+          permanent_city, permanent_state, permanent_postal_code, permanent_country,
+          current_address_line1, current_address_line2, current_city, current_state,
+          current_postal_code, current_country, pan_number, aadhaar_number,
+          passport_number, passport_expiry, driving_license_number, driving_license_expiry
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          empid,
+          phone || null,
+          alternate_phone || null,
+          date_of_birth || null,
+          gender || null,
+          marital_status || null,
+          blood_group || null,
+          emergency_contact_name || null,
+          emergency_contact_phone || null,
+          emergency_contact_relation || null,
+          permanent_address_line1 || null,
+          permanent_address_line2 || null,
+          permanent_city || null,
+          permanent_state || null,
+          permanent_postal_code || null,
+          permanent_country || null,
+          current_address_line1 || null,
+          current_address_line2 || null,
+          current_city || null,
+          current_state || null,
+          current_postal_code || null,
+          current_country || null,
+          pan_number || null,
+          aadhaar_number || null,
+          passport_number || null,
+          passport_expiry || null,
+          driving_license_number || null,
+          driving_license_expiry || null,
+        ]
+      );
+      return res.status(201).json({ created: true });
     }
   } catch (err) {
     next(err);

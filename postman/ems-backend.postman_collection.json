@@ -1,8 +1,8 @@
 {
   "info": {
-    "name": "EMS Backend - Complete",
+    "name": "HRMS Backend - Complete",
     "_postman_id": "f8e1e9e9-0000-4000-9000-ems-backend",
-    "description": "Complete Postman collection for EMS Backend APIs (multi-tenant via JWT token).\n\n**Important Notes:**\n- When creating employees, use `employee_code` (VARCHAR) in the request body\n- Employee endpoints accept both numeric IDs and employee codes in URLs (e.g., `/employees/123` or `/employees/E-001`)\n- Other endpoints use `employee_id` which refers to the numeric foreign key (BIGINT) to `employees.id`\n- **Authentication:** Login first to get `access_token` and `refresh_token`. Access tokens expire in 15 minutes. Use `/auth/refresh` to get a new access token.\n- **Token Management:** Login automatically saves both tokens. Use Refresh Token endpoint when access token expires. Use Logout to revoke refresh token.\n- **Organization Context:** Organization ID is automatically extracted from the JWT token - no need to send X-Org-Id header\n- **404 Handler:** Invalid routes return a structured 404 error response with method, path, and error message\n- **Status Check:** Use `/status` or `/status/detailed` to check database connectivity (public endpoint)",
+    "description": "Complete Postman collection for HRMS Backend APIs (single-tenant).\n\n**Important Notes:**\n- **Primary Keys:** All endpoints use VARCHAR codes as primary keys:\n  - Employees: `empid` (VARCHAR(10))\n  - Departments: `deptid` (VARCHAR(10))\n  - Roles: `roleid` (VARCHAR(10))\n  - Leave Types: `leavetype_id` (VARCHAR(3))\n  - Shifts: `shiftid` (VARCHAR(10))\n  - Document Categories: `categoryid` (VARCHAR(10))\n  - Report Templates: `templateid` (VARCHAR(10))\n  - Onboarding Checklists: `checklistid` (VARCHAR(10))\n- **Boolean Fields:** Use 'Y'/'N' (VARCHAR(1)) instead of 1/0 for is_active, is_confidential, etc.\n- **Authentication:** Login first to get `access_token` and `refresh_token`. Access tokens expire in 15 minutes. Use `/auth/refresh` to get a new access token.\n- **Token Management:** Login automatically saves both tokens. Use Refresh Token endpoint when access token expires. Use Logout to revoke refresh token.\n- **404 Handler:** Invalid routes return a structured 404 error response with method, path, and error message\n- **Status Check:** Use `/status` or `/status/detailed` to check database connectivity (public endpoint)\n- **Module Structure:**\n  - Leaves module is separate from Attendance module\n  - Documents module for document management\n  - Reports module for analytics and dashboards\n  - Onboarding module for employee transitions",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "event": [
@@ -34,7 +34,7 @@
           "    // For all protected routes (everything after app.use(authenticateJWT) in index.js),",
           "    // automatically add Authorization header from environment/collection variables",
           "    // Routes requiring authentication include:",
-          "    // - /employees, /departments, /managers, /attendance/*, /holidays, /leaves, /overtime,",
+          "    // - /employees, /departments, /managers, /attendance/*, /leaves/*, /overtime,",
           "    //   /reports, /locations, /users, /roles, /onboarding, /profile, /admin",
           "    const token = pm.collectionVariables.get('token') || pm.environment.get('token');",
           "    ",
@@ -108,9 +108,9 @@
                   "        pm.environment.set('refresh_token', jsonData.refresh_token);",
                   "        console.log('✅ Refresh token saved');",
                   "    }",
-                  "    if (jsonData.user && jsonData.user.organization_id) {",
-                  "        pm.collectionVariables.set('orgId', jsonData.user.organization_id);",
-                  "        pm.environment.set('orgId', jsonData.user.organization_id);",
+                  "    if (jsonData.user && jsonData.user.empid) {",
+                  "        pm.collectionVariables.set('empid', jsonData.user.empid);",
+                  "        pm.environment.set('empid', jsonData.user.empid);",
                   "    }",
                   "}"
                 ],
@@ -144,7 +144,8 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"newuser@example.com\",\n  \"password\": \"password123\",\n  \"employee_id\": \"E-001\",\n  \"is_active\": 1,\n  \"role\": \"user\"\n}"
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"username\": \"newuser@example.com\",\n  \"password\": \"password123\",\n  \"is_active\": \"Y\",\n  \"roleids\": [\"USER\"]\n}",
+            "description": "Register a new user. Uses empid (VARCHAR(10)) and roleids array. is_active uses 'Y'/'N'."
             }
           }
         },
@@ -280,7 +281,7 @@
       "name": "Organizations",
       "item": [
         {
-          "name": "Get Organization by Code",
+          "name": "Get All Organizations",
           "request": {
             "method": "GET",
             "header": [
@@ -290,27 +291,22 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/organizations?code=ORG001",
+              "raw": "{{baseUrl}}/organizations",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "organizations"
-              ],
-              "query": [
-                {
-                  "key": "code",
-                  "value": "ORG001"
-                }
               ]
             },
             "auth": {
               "type": "noauth"
             }
-          }
+          },
+          "description": "Get all organizations. Can also filter by orgid using query param: ?orgid=ORG001"
         },
         {
-          "name": "Get Organization by ID",
+          "name": "Get Organization by orgid",
           "request": {
             "method": "GET",
             "header": [
@@ -320,19 +316,20 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/organizations/{{orgId}}",
+              "raw": "{{baseUrl}}/organizations/{{orgid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "organizations",
-                "{{orgId}}"
+                "{{orgid}}"
               ]
             },
             "auth": {
               "type": "noauth"
             }
-          }
+          },
+          "description": "Get organization by orgid (VARCHAR(10))."
         },
         {
           "name": "Create Organization",
@@ -358,8 +355,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"ORG001\",\n  \"name\": \"Test Organization\",\n  \"logo_url\": \"https://example.com/logo.png\",\n  \"is_active\": true\n}"
-            }
+              "raw": "{\n  \"orgid\": \"ORG001\",\n  \"name\": \"Test Organization\",\n  \"short_name\": \"TO\",\n  \"logo_url\": \"https://example.com/logo.png\",\n  \"is_active\": \"Y\"\n}"
+            },
+            "description": "Create a new organization. orgid and name are required. orgid must be VARCHAR(10) or less. is_active uses 'Y'/'N' (VARCHAR(1))."
           }
         },
         {
@@ -373,13 +371,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/organizations/{{orgId}}",
+              "raw": "{{baseUrl}}/organizations/{{orgid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "organizations",
-                "{{orgId}}"
+                "{{orgid}}"
               ]
             },
             "auth": {
@@ -387,9 +385,36 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Organization Name\",\n  \"logo_url\": \"https://example.com/new-logo.png\",\n  \"is_active\": true\n}"
-            }
+              "raw": "{\n  \"name\": \"Updated Organization Name\",\n  \"logo_url\": \"https://example.com/new-logo.png\",\n  \"is_active\": \"Y\"\n}"
+            },
+            "description": "Update an organization. Uses orgid (VARCHAR(10)). is_active uses 'Y'/'N' (VARCHAR(1))."
           }
+        },
+        {
+          "name": "Delete Organization",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/organizations/{{orgid}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "organizations",
+                "{{orgid}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "description": "Delete (deactivate) an organization by setting is_active to 'N'. Uses orgid (VARCHAR(10))."
         }
       ]
     },
@@ -428,13 +453,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}",
+              "raw": "{{baseUrl}}/employees/{{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "employees",
-                "{{employeeId}}"
+                "{{empid}}"
               ]
             }
           }
@@ -460,7 +485,8 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"employee_code\": \"EMP-001\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"manager_id\": null,\n  \"department_id\": 1,\n  \"location_id\": 1\n}"
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"doj\": \"2024-01-15\",\n  \"manager_id\": null,\n  \"hr_manager_id\": null,\n  \"department_id\": \"DEPT001\",\n  \"location_id\": 1\n}",
+            "description": "Create a new employee. Uses empid (VARCHAR(10)) as primary key. department_id uses deptid (VARCHAR(10))."
             }
           }
         },
@@ -475,18 +501,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}",
+              "raw": "{{baseUrl}}/employees/{{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "employees",
-                "{{employeeId}}"
+                "{{empid}}"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"John Updated\",\n  \"email\": \"john.updated@example.com\",\n  \"hr_manager_id\": 2,\n  \"department_id\": 1\n}"
+              "raw": "{\n  \"name\": \"John Updated\",\n  \"email\": \"john.updated@example.com\",\n  \"hr_manager_id\": \"EMP002\",\n  \"department_id\": \"DEPT001\"\n}",
+            "description": "Update employee. Uses empid, deptid (VARCHAR(10)) for department_id, and empid for manager references."
             }
           }
         },
@@ -501,13 +528,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/available-hr-managers",
+              "raw": "{{baseUrl}}/employees/{{empid}}/available-hr-managers",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "employees",
-                "{{employeeId}}",
+                "{{empid}}",
                 "available-hr-managers"
               ]
             }
@@ -524,16 +551,16 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}",
+              "raw": "{{baseUrl}}/employees/{{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "employees",
-                "{{employeeId}}"
+                "{{empid}}"
               ]
             },
-            "description": "Delete an employee by ID. Supports both numeric ID and employee_code. Returns 409 if employee is referenced by other records (e.g., as manager, department head)."
+            "description": "Delete an employee by empid (VARCHAR(10)). Returns 409 if employee is referenced by other records (e.g., as manager, department head)."
           },
           "event": [
             {
@@ -578,7 +605,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/personal",
+              "raw": "{{baseUrl}}/employees/{{empid}}/personal",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -601,7 +628,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/personal",
+              "raw": "{{baseUrl}}/employees/{{empid}}/personal",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -633,7 +660,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/education",
+              "raw": "{{baseUrl}}/employees/{{empid}}/education",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -656,7 +683,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/education",
+              "raw": "{{baseUrl}}/employees/{{empid}}/education",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -740,7 +767,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/employment-history",
+              "raw": "{{baseUrl}}/employees/{{empid}}/employment-history",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -763,7 +790,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/employment-history",
+              "raw": "{{baseUrl}}/employees/{{empid}}/employment-history",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -834,6 +861,843 @@
       ]
     },
     {
+      "name": "Employee Job Information",
+      "item": [
+        {
+          "name": "Get Job Information",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{empid}}/job-information",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{empid}}",
+                "job-information"
+              ]
+            }
+          },
+          "description": "Get job information for an employee including employment type, status, probation details, etc. Uses empid (VARCHAR(10)) instead of numeric ID."
+        },
+        {
+          "name": "Create/Update Job Information",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{empid}}/job-information",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{empid}}",
+                "job-information"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"job_title\": \"Senior Software Engineer\",\n  \"employment_type\": \"full_time\",\n  \"employment_status\": \"active\",\n  \"date_of_joining\": \"2024-01-15\",\n  \"probation_start_date\": \"2024-01-15\",\n  \"probation_end_date\": \"2024-04-15\",\n  \"probation_status\": \"completed\",\n  \"confirmation_date\": \"2024-04-15\",\n  \"shiftid\": \"SHIFT001\",\n  \"cost_center\": \"CC-001\",\n  \"employee_category\": \"Regular\",\n  \"grade\": \"L3\",\n  \"level\": \"Senior\"\n}"
+            }
+          },
+          "description": "Create or update job information. Uses empid (VARCHAR(10)) and shiftid (VARCHAR(10)). HR Manager/Admin only."
+        },
+        {
+          "name": "Get Job History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{empid}}/job-history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{empid}}",
+                "job-history"
+              ]
+            }
+          },
+          "description": "Get job history including promotions, transfers, and role changes. Uses empid (VARCHAR(10)) instead of numeric ID."
+        },
+        {
+          "name": "Add Job History Entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{empid}}/job-history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{empid}}",
+                "job-history"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"previous_job_title\": \"Software Engineer\",\n  \"new_job_title\": \"Senior Software Engineer\",\n  \"previous_department_id\": \"DEPT001\",\n  \"new_department_id\": \"DEPT001\",\n  \"previous_manager_id\": \"EMP002\",\n  \"new_manager_id\": \"EMP003\",\n  \"change_type\": \"PROMOTION\",\n  \"effective_date\": \"2024-06-01\",\n  \"reason\": \"Performance-based promotion\",\n  \"notes\": \"Promoted based on excellent performance review\"\n}"
+            }
+          },
+          "description": "Add a job history entry (promotion, transfer, etc.). Uses empid, deptid (VARCHAR(10)), and change_type values: PROMOTION, TRANSFER, DEMOTION, ROLE_CHANGE, DEPARTMENT_CHANGE, MANAGER_CHANGE. HR Manager/Admin only."
+        }
+      ]
+    },
+    {
+      "name": "Employee Payroll",
+      "item": [
+        {
+          "name": "Get Payroll Information",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/payroll-information",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "payroll-information"
+              ]
+            }
+          },
+          "description": "Get payroll information including bank details and tax IDs. HR Manager/Admin only."
+        },
+        {
+          "name": "Create/Update Payroll Information",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/payroll-information",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "payroll-information"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bank_name\": \"ABC Bank\",\n  \"account_number\": \"1234567890\",\n  \"account_holder_name\": \"John Doe\",\n  \"ifsc_code\": \"ABCD0123456\",\n  \"branch_name\": \"Main Branch\",\n  \"account_type\": \"salary\",\n  \"pan_number\": \"ABCDE1234F\",\n  \"aadhaar_number\": \"123456789012\",\n  \"payment_method\": \"bank_transfer\",\n  \"payroll_frequency\": \"monthly\",\n  \"pf_number\": \"PF123456\",\n  \"esi_number\": \"ESI123456\",\n  \"uan_number\": \"UAN123456\"\n}"
+            }
+          },
+          "description": "Create or update payroll information. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Salary Structure",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/salary-structure?current_only=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "salary-structure"
+              ],
+              "query": [
+                {
+                  "key": "current_only",
+                  "value": "true",
+                  "description": "Get only current salary structure",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get current and historical salary structures. HR Manager/Admin only."
+        },
+        {
+          "name": "Create Salary Structure",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/salary-structure",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "salary-structure"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"effective_from\": \"2024-01-01\",\n  \"effective_to\": null,\n  \"basic_salary\": 50000,\n  \"house_rent_allowance\": 15000,\n  \"transport_allowance\": 2000,\n  \"medical_allowance\": 3000,\n  \"special_allowance\": 5000,\n  \"provident_fund\": 5000,\n  \"professional_tax\": 200,\n  \"income_tax\": 5000,\n  \"currency\": \"USD\"\n}"
+            }
+          },
+          "description": "Create a new salary structure. Automatically ends previous structure. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Benefits",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/benefits?is_active=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "benefits"
+              ],
+              "query": [
+                {
+                  "key": "is_active",
+                  "value": "true",
+                  "description": "Filter by active status",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get benefits enrollment for an employee. HR Manager/Admin only."
+        },
+        {
+          "name": "Enroll in Benefit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/benefits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "benefits"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"benefit_type\": \"health_insurance\",\n  \"benefit_name\": \"Premium Health Plan\",\n  \"provider_name\": \"XYZ Insurance\",\n  \"policy_number\": \"POL123456\",\n  \"enrollment_date\": \"2024-01-01\",\n  \"coverage_start_date\": \"2024-01-01\",\n  \"coverage_end_date\": \"2024-12-31\",\n  \"premium_amount\": 500,\n  \"employee_contribution\": 100,\n  \"employer_contribution\": 400\n}"
+            }
+          },
+          "description": "Enroll employee in a benefit. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Payslips",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/payslips?from_date=2024-01-01&to_date=2024-12-31&status=generated",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "payslips"
+              ],
+              "query": [
+                {
+                  "key": "from_date",
+                  "value": "2024-01-01",
+                  "description": "Start date filter",
+                  "disabled": true
+                },
+                {
+                  "key": "to_date",
+                  "value": "2024-12-31",
+                  "description": "End date filter",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "generated",
+                  "description": "Filter by status: draft, generated, sent, acknowledged",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get payslips for an employee. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Tax Forms",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/tax-forms?form_type=W-4&tax_year=2024",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "tax-forms"
+              ],
+              "query": [
+                {
+                  "key": "form_type",
+                  "value": "W-4",
+                  "description": "Filter by form type",
+                  "disabled": true
+                },
+                {
+                  "key": "tax_year",
+                  "value": "2024",
+                  "description": "Filter by tax year",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get tax forms for an employee. HR Manager/Admin only."
+        },
+        {
+          "name": "Add Tax Form",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/tax-forms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "tax-forms"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"form_type\": \"W-4\",\n  \"form_name\": \"Employee's Withholding Certificate\",\n  \"tax_year\": 2024,\n  \"filing_status\": \"Single\",\n  \"exemptions\": 1,\n  \"additional_withholding\": 0,\n  \"submitted_date\": \"2024-01-15\"\n}"
+            }
+          },
+          "description": "Add a tax form for an employee. HR Manager/Admin only."
+        }
+      ]
+    },
+    {
+      "name": "Employee Compliance",
+      "item": [
+        {
+          "name": "Get Contracts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/contracts?is_active=true&contract_type=permanent",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "contracts"
+              ],
+              "query": [
+                {
+                  "key": "is_active",
+                  "value": "true",
+                  "description": "Filter by active status",
+                  "disabled": true
+                },
+                {
+                  "key": "contract_type",
+                  "value": "permanent",
+                  "description": "Filter by contract type",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get employment contracts for an employee. HR Manager/Admin only."
+        },
+        {
+          "name": "Create Contract",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/contracts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "contracts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contract_type\": \"permanent\",\n  \"contract_number\": \"CONTRACT-001\",\n  \"start_date\": \"2024-01-01\",\n  \"end_date\": null,\n  \"notice_period_days\": 30,\n  \"salary_mentioned\": 50000,\n  \"signed_date\": \"2024-01-01\",\n  \"employer_signatory\": 1\n}"
+            }
+          },
+          "description": "Create an employment contract. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Work Permits",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/work-permits?is_active=true&permit_type=work_visa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "work-permits"
+              ],
+              "query": [
+                {
+                  "key": "is_active",
+                  "value": "true",
+                  "description": "Filter by active status",
+                  "disabled": true
+                },
+                {
+                  "key": "permit_type",
+                  "value": "work_visa",
+                  "description": "Filter by permit type",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get work permits and visas for an employee. HR Manager/Admin only."
+        },
+        {
+          "name": "Add Work Permit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/work-permits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "work-permits"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permit_type\": \"work_visa\",\n  \"permit_number\": \"VISA123456\",\n  \"issuing_country\": \"USA\",\n  \"issue_date\": \"2024-01-01\",\n  \"expiry_date\": \"2026-01-01\",\n  \"renewal_reminder_days\": 90\n}"
+            }
+          },
+          "description": "Add a work permit or visa. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Background Checks",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/background-checks?check_type=comprehensive&check_status=completed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "background-checks"
+              ],
+              "query": [
+                {
+                  "key": "check_type",
+                  "value": "comprehensive",
+                  "description": "Filter by check type",
+                  "disabled": true
+                },
+                {
+                  "key": "check_status",
+                  "value": "completed",
+                  "description": "Filter by status",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get background checks for an employee. HR Manager/Admin only."
+        },
+        {
+          "name": "Add Background Check",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/background-checks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "background-checks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"check_type\": \"comprehensive\",\n  \"vendor_name\": \"Background Check Inc\",\n  \"initiated_date\": \"2024-01-01\",\n  \"completed_date\": \"2024-01-15\",\n  \"result\": \"clear\"\n}"
+            }
+          },
+          "description": "Add a background check record. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Training Certifications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/training-certifications?training_type=mandatory&status=completed&is_compliance_required=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "training-certifications"
+              ],
+              "query": [
+                {
+                  "key": "training_type",
+                  "value": "mandatory",
+                  "description": "Filter by training type",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "completed",
+                  "description": "Filter by status",
+                  "disabled": true
+                },
+                {
+                  "key": "is_compliance_required",
+                  "value": "true",
+                  "description": "Filter by compliance requirement",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get training and certifications for an employee. HR Manager/Admin only."
+        },
+        {
+          "name": "Add Training Certification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/training-certifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "training-certifications"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"training_type\": \"mandatory\",\n  \"training_name\": \"Safety Training\",\n  \"provider_name\": \"Safety Institute\",\n  \"certification_number\": \"CERT123456\",\n  \"start_date\": \"2024-01-01\",\n  \"completion_date\": \"2024-01-15\",\n  \"expiry_date\": \"2025-01-15\",\n  \"status\": \"completed\",\n  \"is_mandatory\": true,\n  \"is_compliance_required\": true,\n  \"score\": 95.5\n}"
+            }
+          },
+          "description": "Add a training or certification record. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Health Safety Records",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/health-safety?record_type=medical_examination&is_compliant=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "health-safety"
+              ],
+              "query": [
+                {
+                  "key": "record_type",
+                  "value": "medical_examination",
+                  "description": "Filter by record type",
+                  "disabled": true
+                },
+                {
+                  "key": "is_compliant",
+                  "value": "true",
+                  "description": "Filter by compliance status",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get health and safety compliance records. HR Manager/Admin only."
+        },
+        {
+          "name": "Add Health Safety Record",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/health-safety",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "health-safety"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"record_type\": \"medical_examination\",\n  \"record_name\": \"Annual Health Checkup\",\n  \"conducted_date\": \"2024-01-15\",\n  \"expiry_date\": \"2025-01-15\",\n  \"is_compliant\": true\n}"
+            }
+          },
+          "description": "Add a health and safety compliance record. HR Manager/Admin only."
+        },
+        {
+          "name": "Get Disciplinary Actions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/disciplinary-actions?action_type=written_warning&status=open&severity=medium",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "disciplinary-actions"
+              ],
+              "query": [
+                {
+                  "key": "action_type",
+                  "value": "written_warning",
+                  "description": "Filter by action type",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "open",
+                  "description": "Filter by status",
+                  "disabled": true
+                },
+                {
+                  "key": "severity",
+                  "value": "medium",
+                  "description": "Filter by severity",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get disciplinary actions and grievances. HR Manager/Admin only."
+        },
+        {
+          "name": "Add Disciplinary Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{employeeId}}/disciplinary-actions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{employeeId}}",
+                "disciplinary-actions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action_type\": \"written_warning\",\n  \"incident_date\": \"2024-12-15\",\n  \"reported_date\": \"2024-12-16\",\n  \"description\": \"Violation of company policy\",\n  \"severity\": \"medium\",\n  \"status\": \"open\",\n  \"initiated_by\": 1,\n  \"investigated_by\": 2,\n  \"is_confidential\": true\n}"
+            }
+          },
+          "description": "Add a disciplinary action or grievance record. HR Manager/Admin only."
+        },
+        {
+          "name": "Update Disciplinary Action",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/disciplinary-actions/{{actionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "disciplinary-actions",
+                "{{actionId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"resolved\",\n  \"resolution\": \"Employee acknowledged and committed to improvement\",\n  \"resolution_date\": \"2024-12-20\",\n  \"action_taken\": \"Written warning issued\",\n  \"resolved_by\": 2\n}"
+            }
+          },
+          "description": "Update/resolve a disciplinary action. HR Manager/Admin only."
+        }
+      ]
+    },
+    {
       "name": "Employee Family",
       "item": [
         {
@@ -847,7 +1711,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/family",
+              "raw": "{{baseUrl}}/employees/{{empid}}/family",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -870,7 +1734,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/family",
+              "raw": "{{baseUrl}}/employees/{{empid}}/family",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -975,13 +1839,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments/{{departmentId}}",
+              "raw": "{{baseUrl}}/departments/{{deptid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "departments",
-                "{{departmentId}}"
+                "{{deptid}}"
               ]
             }
           }
@@ -1007,7 +1871,8 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"department_code\": \"DEPT-001\",\n  \"name\": \"Engineering\"\n}"
+              "raw": "{\n  \"deptid\": \"DEPT001\",\n  \"name\": \"Engineering\",\n  \"short_name\": \"ENG\",\n  \"department_head_id\": \"EMP001\"\n}",
+            "description": "Create a department. Uses deptid (VARCHAR(10)) as primary key. department_head_id is optional (empid VARCHAR(10))."
             }
           }
         },
@@ -1022,18 +1887,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments/{{departmentId}}",
+              "raw": "{{baseUrl}}/departments/{{deptid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "departments",
-                "{{departmentId}}"
+                "{{deptid}}"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Department Name\",\n  \"department_code\": \"DEPT-001-UPDATED\",\n  \"department_head\": 1\n}"
+              "raw": "{\n  \"name\": \"Updated Department Name\",\n  \"short_name\": \"ENG-UPD\",\n  \"department_head_id\": \"EMP001\"\n}",
+            "description": "Update department. Uses deptid (VARCHAR(10)) and department_head_id (empid VARCHAR(10))."
             }
           }
         },
@@ -1048,13 +1914,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments/{{departmentId}}",
+              "raw": "{{baseUrl}}/departments/{{deptid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "departments",
-                "{{departmentId}}"
+                "{{deptid}}"
               ]
             }
           }
@@ -1075,17 +1941,32 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments/{{departmentId}}/hr-managers",
+              "raw": "{{baseUrl}}/departments/{{deptid}}/hr-managers?is_active=Y",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "departments",
-                "{{departmentId}}",
+                "{{deptid}}",
                 "hr-managers"
+              ],
+              "query": [
+                {
+                  "key": "is_active",
+                  "value": "Y",
+                  "description": "Filter by active status: Y or N",
+                  "disabled": true
+                },
+                {
+                  "key": "effective_date",
+                  "value": "",
+                  "description": "Filter by effective date (YYYY-MM-DD)",
+                  "disabled": true
+                }
               ]
             }
-          }
+          },
+          "description": "Get all HR managers for a department. Uses deptid (VARCHAR(10)). Query params: is_active, effective_date."
         },
         {
           "name": "Add HR Manager to Department",
@@ -1098,20 +1979,50 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments/{{departmentId}}/hr-managers",
+              "raw": "{{baseUrl}}/departments/{{deptid}}/hr-managers",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "departments",
-                "{{departmentId}}",
+                "{{deptid}}",
                 "hr-managers"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"hr_manager\": \"HR-001\"\n}"
-            }
+              "raw": "{\n  \"hr_manager_empid\": \"HR001\",\n  \"effective_from\": \"2024-01-01\",\n  \"effective_to\": null,\n  \"is_active\": \"Y\",\n  \"assigned_by\": \"ADMIN001\",\n  \"remarks\": \"Primary HR manager for Engineering department\"\n}"
+            },
+            "description": "Add an HR manager to a department. Required: hr_manager_empid (VARCHAR(10)), effective_from (DATE). Optional: effective_to, is_active ('Y'/'N'), assigned_by, remarks."
+          }
+        },
+        {
+          "name": "Update HR Manager Assignment",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/departments/{{deptid}}/hr-managers/{{assignmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "departments",
+                "{{deptid}}",
+                "hr-managers",
+                "{{assignmentId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"effective_to\": \"2024-12-31\",\n  \"is_active\": \"N\",\n  \"remarks\": \"Assignment ended\"\n}"
+            },
+            "description": "Update an HR manager assignment. All fields are optional. Uses assignmentId (the id from department_hr_managers table)."
           }
         },
         {
@@ -1125,18 +2036,56 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/departments/{{departmentId}}/hr-managers/{{hrManagerId}}",
+              "raw": "{{baseUrl}}/departments/{{deptid}}/hr-managers/{{assignmentId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "departments",
-                "{{departmentId}}",
+                "{{deptid}}",
                 "hr-managers",
-                "{{hrManagerId}}"
+                "{{assignmentId}}"
               ]
             }
-          }
+          },
+          "description": "Remove an HR manager from a department (soft delete by setting is_active='N' and effective_to=today). Uses assignmentId (the id from department_hr_managers table)."
+        }
+      ]
+    },
+    {
+      "name": "Employee Leaves",
+      "item": [
+        {
+          "name": "Get Leave Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{empid}}/leaves/summary?year=2024",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{empid}}",
+                "leaves",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "2024",
+                  "description": "Optional: Year for the summary (defaults to current year)"
+                }
+              ]
+            }
+          },
+          "description": "Get leave summary for an employee. Returns available leaves, leaves taken, pending leaves by leave type. Query param: year (optional, defaults to current year)."
         }
       ]
     },
@@ -1186,7 +2135,7 @@
               ]
             }
           },
-          "description": "Get detailed information about a manager. Accepts numeric ID or employee_code."
+          "description": "Get detailed information about a manager. Uses empid (VARCHAR(10))."
         },
         {
           "name": "Get Manager's Employees",
@@ -1241,7 +2190,7 @@
               ]
             }
           },
-          "description": "Get comprehensive team dashboard overview with summary statistics including team count, present/absent today, pending leaves, upcoming birthdays/anniversaries, and 30-day attendance rate."
+          "description": "Get comprehensive team dashboard overview with summary statistics including team count, present/absent today, pending leaves, upcoming birthdays/anniversaries, and 30-day attendance rate. Uses empid (VARCHAR(10)) instead of numeric IDs. Status values: PRESENT, ABSENT, HALF_DAY, LATE, EARLY_LEAVE."
         },
         {
           "name": "Get Manager's Team Attendance",
@@ -1254,7 +2203,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/managers/{{managerId}}/attendance?from=2024-01-01&to=2024-01-31&status=present",
+              "raw": "{{baseUrl}}/managers/{{managerId}}/attendance?from=2024-01-01&to=2024-01-31&status=PRESENT",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1276,19 +2225,62 @@
                 },
                 {
                   "key": "status",
-                  "value": "present",
-                  "description": "Filter by status: present, absent, half_day, on_leave, week_off, holiday"
+                  "value": "PRESENT",
+                  "description": "Filter by status: PRESENT, ABSENT, HALF_DAY, LATE, EARLY_LEAVE"
                 },
                 {
-                  "key": "employee_id",
+                  "key": "empid",
                   "value": "",
-                  "description": "Optional: Filter by specific employee",
+                  "description": "Optional: Filter by specific employee empid (VARCHAR(10))",
                   "disabled": true
                 }
               ]
             }
           },
-          "description": "Get attendance records for all team members with optional date range and status filtering."
+          "description": "Get attendance records for all team members with optional date range and status filtering. Uses empid (VARCHAR(10)) instead of numeric employee_id."
+        },
+        {
+          "name": "Get Manager's Pending Attendance Corrections",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/managers/{{managerId}}/attendance/corrections?from_date=2024-01-01&to_date=2024-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "managers",
+                "{{managerId}}",
+                "attendance",
+                "corrections"
+              ],
+              "query": [
+                {
+                  "key": "from_date",
+                  "value": "2024-01-01",
+                  "description": "Filter corrections from this date (YYYY-MM-DD)"
+                },
+                {
+                  "key": "to_date",
+                  "value": "2024-12-31",
+                  "description": "Filter corrections until this date (YYYY-MM-DD)"
+                },
+                {
+                  "key": "empid",
+                  "value": "",
+                  "description": "Optional: Filter by specific employee empid (VARCHAR(10))",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get all pending attendance correction requests from team members awaiting approval. Uses empid (VARCHAR(10)) instead of numeric employee_id. Status: PENDING only."
         },
         {
           "name": "Get Manager's Pending Leaves",
@@ -1301,7 +2293,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/managers/{{managerId}}/leaves/pending?from=2024-01-01&to=2024-12-31&leave_type=casual",
+              "raw": "{{baseUrl}}/managers/{{managerId}}/leaves/pending?from=2024-01-01&to=2024-12-31&leavetype_id=CAS",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1323,20 +2315,20 @@
                   "description": "Filter leaves ending before this date (YYYY-MM-DD)"
                 },
                 {
-                  "key": "leave_type",
-                  "value": "casual",
-                  "description": "Filter by type: casual, sick, earned, unpaid, other"
+                  "key": "leavetype_id",
+                  "value": "CAS",
+                  "description": "Filter by leave type ID (VARCHAR(3))"
                 },
                 {
-                  "key": "employee_id",
+                  "key": "empid",
                   "value": "",
-                  "description": "Optional: Filter by specific employee",
+                  "description": "Optional: Filter by specific employee empid (VARCHAR(10))",
                   "disabled": true
                 }
               ]
             }
           },
-          "description": "Get all pending leave requests from team members awaiting approval."
+          "description": "Get all pending leave requests from team members awaiting approval. Uses empid (VARCHAR(10)) instead of numeric employee_id. Status values: PENDING, APPROVED, REJECTED, CANCELLED."
         },
         {
           "name": "Get Manager's Team Analytics",
@@ -1367,7 +2359,7 @@
               ]
             }
           },
-          "description": "Get comprehensive team analytics including attendance trends, leave utilization by employee, attendance by status summary, and average work hours."
+          "description": "Get comprehensive team analytics including attendance trends, leave utilization by employee, attendance by status summary, and average work hours. Uses empid (VARCHAR(10)) instead of numeric IDs. Status values: PRESENT, ABSENT, HALF_DAY, LATE, EARLY_LEAVE for attendance; PENDING, APPROVED, REJECTED, CANCELLED for leaves."
         }
       ]
     },
@@ -1385,13 +2377,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/profile/{{employeeId}}",
+              "raw": "{{baseUrl}}/users/profile",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "profile",
-                "{{employeeId}}"
+                "users",
+                "profile"
               ]
             }
           }
@@ -1422,7 +2414,8 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"employee_code\": \"EMP-001\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"department_id\": \"DEPT-001\",\n  \"manager\": \"EMP-002\",\n  \"hr_manager\": \"HR-001\",\n  \"location_id\": 1,\n  \"create_user_account\": false\n}"
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"name\": \"John Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"doj\": \"2024-01-15\",\n  \"department_id\": \"DEPT001\",\n  \"manager_id\": \"EMP002\",\n  \"hr_manager_id\": \"EMP003\",\n  \"location_id\": 1\n}",
+            "description": "Create employee during onboarding. Uses empid (VARCHAR(10)) and deptid for department_id."
             }
           }
         },
@@ -1437,18 +2430,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/onboarding/{{employeeId}}",
+              "raw": "{{baseUrl}}/onboarding/{{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "onboarding",
-                "{{employeeId}}"
+                "{{empid}}"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"department_id\": \"DEPT-001\",\n  \"manager\": \"EMP-002\",\n  \"hr_manager\": \"HR-001\",\n  \"location_id\": 1,\n  \"set_as_department_head\": false\n}"
+              "raw": "{\n  \"department_id\": \"DEPT001\",\n  \"manager_id\": \"EMP002\",\n  \"hr_manager_id\": \"EMP003\",\n  \"location_id\": 1\n}",
+            "description": "Update employee onboarding. Uses empid (VARCHAR(10)) and deptid for department_id."
             }
           }
         }
@@ -1522,7 +2516,8 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Main Office\",\n  \"address_line1\": \"123 Main St\",\n  \"address_line2\": \"Suite 100\",\n  \"city\": \"New York\",\n  \"state\": \"NY\",\n  \"postal_code\": \"10001\",\n  \"country\": \"USA\",\n  \"phone\": \"+1234567890\"\n}"
-            }
+            },
+            "description": "Create a new office location. Required fields: name, address_line1, city, state, postal_code, country. address_line2 and phone are optional."
           }
         },
         {
@@ -1547,8 +2542,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Office Name\"\n}"
-            }
+              "raw": "{\n  \"name\": \"Updated Office Name\",\n  \"city\": \"Boston\",\n  \"phone\": \"+1987654321\"\n}"
+            },
+            "description": "Update a location. All fields are optional. Only provided fields will be updated."
           }
         },
         {
@@ -1571,7 +2567,8 @@
                 "{{locationId}}"
               ]
             }
-          }
+          },
+          "description": "Delete a location. Will fail if location is assigned to any employees. Uses locationId (TINYINT UNSIGNED)."
         },
         {
           "name": "Assign Location to Employee",
@@ -1584,7 +2581,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/locations/{{locationId}}/assign-employee/{{employeeId}}",
+              "raw": "{{baseUrl}}/locations/{{locationId}}/assign-employee/{{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1592,10 +2589,11 @@
                 "locations",
                 "{{locationId}}",
                 "assign-employee",
-                "{{employeeId}}"
+                "{{empid}}"
               ]
             }
-          }
+          },
+          "description": "Assign a location to an employee. Uses locationId (TINYINT) and empid (VARCHAR(10))."
         }
       ]
     },
@@ -1657,13 +2655,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}",
+              "raw": "{{baseUrl}}/users/{{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{userId}}"
+                "{{empid}}"
               ]
             }
           }
@@ -1689,7 +2687,8 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"newuser\",\n  \"password\": \"password123\",\n  \"employee_id\": \"EMP-001\",\n  \"is_active\": 1,\n  \"role_ids\": [\n    1,\n    2\n  ]\n}"
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"username\": \"newuser\",\n  \"password\": \"password123\",\n  \"is_active\": \"Y\",\n  \"roleids\": [\n    \"ADMIN\",\n    \"USER\"\n  ]\n}",
+            "description": "Create a user. Uses empid (VARCHAR(10)) and roleids array with roleid (VARCHAR(10)). is_active uses 'Y'/'N'."
             }
           }
         },
@@ -1704,18 +2703,19 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}",
+              "raw": "{{baseUrl}}/users/{{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{userId}}"
+                "{{empid}}"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"is_active\": 0,\n  \"role_ids\": [\n    1\n  ]\n}"
+              "raw": "{\n  \"is_active\": \"N\",\n  \"roleids\": [\n    \"USER\"\n  ]\n}",
+            "description": "Update user. Uses empid (VARCHAR(10)) and roleids array. is_active uses 'Y'/'N'."
             }
           }
         },
@@ -1730,13 +2730,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}",
+              "raw": "{{baseUrl}}/users/{{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{userId}}"
+                "{{empid}}"
               ]
             }
           }
@@ -1764,7 +2764,8 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"role_id\": 1\n}"
+              "raw": "{\n  \"roleid\": \"ADMIN\"\n}",
+            "description": "Assign role to user. Uses empid (VARCHAR(10)) and roleid (VARCHAR(10))."
             },
             "description": "Assign a role to a user. If the role is already assigned, the request will succeed without error."
           }
@@ -1780,15 +2781,15 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{userId}}/roles/{{roleId}}",
+              "raw": "{{baseUrl}}/users/{{empid}}/roles/{{roleid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{userId}}",
+                "{{empid}}",
                 "roles",
-                "{{roleId}}"
+                "{{roleid}}"
               ]
             },
             "description": "Remove a role from a user. Returns 404 if the user role assignment is not found."
@@ -1831,13 +2832,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/roles/{{roleId}}",
+              "raw": "{{baseUrl}}/roles/{{roleid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "roles",
-                "{{roleId}}"
+                "{{roleid}}"
               ]
             }
           }
@@ -1878,13 +2879,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/roles/{{roleId}}",
+              "raw": "{{baseUrl}}/roles/{{roleid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "roles",
-                "{{roleId}}"
+                "{{roleid}}"
               ]
             },
             "body": {
@@ -1904,13 +2905,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/roles/{{roleId}}",
+              "raw": "{{baseUrl}}/roles/{{roleid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "roles",
-                "{{roleId}}"
+                "{{roleid}}"
               ]
             }
           }
@@ -1976,17 +2977,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/attendance/shifts/{{shiftId}}",
+              "raw": "{{baseUrl}}/attendance/shifts/{{shiftid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "attendance",
                 "shifts",
-                "{{shiftId}}"
+                "{{shiftid}}"
               ]
             }
-          }
+          },
+          "description": "Get a shift by shiftid (VARCHAR(10)). No organization_id required."
         },
         {
           "name": "Create Shift",
@@ -2010,8 +3012,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Morning Shift\",\n  \"start_time\": \"09:00:00\",\n  \"end_time\": \"17:00:00\",\n  \"is_overnight\": 0,\n  \"grace_in_minutes\": 15,\n  \"default_break_minutes\": 60\n}"
-            }
+              "raw": "{\n  \"shiftid\": \"SHIFT001\",\n  \"name\": \"Morning Shift\",\n  \"start_time\": \"09:00:00\",\n  \"end_time\": \"17:00:00\",\n  \"break_duration_minutes\": 60,\n  \"total_hours\": 8.0,\n  \"is_active\": \"Y\"\n}"
+            },
+            "description": "Create a shift. Required: shiftid (VARCHAR(10)), name, start_time, end_time, total_hours. Optional: break_duration_minutes (default 0), is_active (default 'Y'). No organization_id required."
           }
         },
         {
@@ -2025,20 +3028,21 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/attendance/shifts/{{shiftId}}",
+              "raw": "{{baseUrl}}/attendance/shifts/{{shiftid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "attendance",
                 "shifts",
-                "{{shiftId}}"
+                "{{shiftid}}"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Shift Name\",\n  \"start_time\": \"08:00:00\"\n}"
-            }
+              "raw": "{\n  \"name\": \"Updated Shift Name\",\n  \"start_time\": \"08:00:00\",\n  \"end_time\": \"16:00:00\",\n  \"break_duration_minutes\": 45,\n  \"total_hours\": 7.25,\n  \"is_active\": \"Y\"\n}"
+            },
+            "description": "Update a shift. All fields are optional. Use shiftid (VARCHAR(10)) in URL."
           }
         },
         {
@@ -2052,17 +3056,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/attendance/shifts/{{shiftId}}",
+              "raw": "{{baseUrl}}/attendance/shifts/{{shiftid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "attendance",
                 "shifts",
-                "{{shiftId}}"
+                "{{shiftid}}"
               ]
             }
-          }
+          },
+          "description": "Delete a shift by shiftid (VARCHAR(10)). No organization_id required."
         }
       ]
     },
@@ -2080,16 +3085,18 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/shift-assignments",
+              "raw": "{{baseUrl}}/employees/{{empid}}/shift-assignments",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "employees",
+                "{{empid}}",
                 "shift-assignments"
               ]
             }
-          }
+          },
+          "description": "Get shift assignments for an employee. Uses empid (VARCHAR(10)) instead of employee_id."
         },
         {
           "name": "Create Shift Assignment",
@@ -2102,19 +3109,21 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/employees/{{employeeId}}/shift-assignments",
+              "raw": "{{baseUrl}}/employees/{{empid}}/shift-assignments",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "employees",
+                "{{empid}}",
                 "shift-assignments"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"shift_id\": 1,\n  \"effective_from\": \"2024-01-01\",\n  \"effective_to\": \"2024-12-31\"\n}"
-            }
+              "raw": "{\n  \"shiftid\": \"SHIFT001\",\n  \"effective_from\": \"2024-01-01\",\n  \"effective_to\": \"2024-12-31\",\n  \"is_active\": \"Y\",\n  \"assigned_by\": \"EMP001\"\n}"
+            },
+            "description": "Create a shift assignment. Required: shiftid (VARCHAR(10)), effective_from. Optional: effective_to (null for ongoing), is_active (default 'Y'), assigned_by (empid VARCHAR(10)). Uses empid (VARCHAR(10)) in URL instead of employee_id."
           }
         }
       ]
@@ -2200,7 +3209,7 @@
       ]
     },
     {
-      "name": "Attendance - Holidays",
+      "name": "Leaves - Holidays",
       "item": [
         {
           "name": "Get All Holidays",
@@ -2213,7 +3222,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/holidays?year=2024",
+              "raw": "{{baseUrl}}/holidays?calendar_id={{calendarId}}&year=2024",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2222,12 +3231,42 @@
               ],
               "query": [
                 {
+                  "key": "calendar_id",
+                  "value": "{{calendarId}}",
+                  "description": "Required: Calendar ID"
+                },
+                {
                   "key": "year",
-                  "value": "2024"
+                  "value": "2024",
+                  "description": "Optional: Filter by year"
                 }
               ]
             }
-          }
+          },
+          "description": "Get all holidays for a specific calendar. Query params: calendar_id (required), year (optional)."
+        },
+        {
+          "name": "Get Holiday by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/holidays/{{holidayId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "holidays",
+                "{{holidayId}}"
+              ]
+            }
+          },
+          "description": "Get a specific holiday by ID."
         },
         {
           "name": "Create Holiday",
@@ -2250,8 +3289,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"holiday_date\": \"2024-12-25\",\n  \"name\": \"Christmas\",\n  \"type\": \"company\",\n  \"region\": null,\n  \"is_optional\": 0\n}"
-            }
+              "raw": "{\n  \"calendar_id\": 1,\n  \"name\": \"Christmas\",\n  \"holiday_date\": \"2024-12-25\",\n  \"is_optional\": \"N\",\n  \"is_override\": \"N\",\n  \"description\": \"Christmas holiday\"\n}"
+            },
+            "description": "Create a holiday. calendar_id, name, and holiday_date are required. is_optional: 'Y' or 'N' (default: 'N'). is_override: 'Y' or 'N' (default: 'N'). description is optional."
           }
         },
         {
@@ -2276,8 +3316,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Holiday Name\"\n}"
-            }
+              "raw": "{\n  \"name\": \"Updated Holiday Name\",\n  \"holiday_date\": \"2024-12-26\",\n  \"is_optional\": \"Y\",\n  \"is_override\": \"N\",\n  \"description\": \"Updated description\"\n}"
+            },
+            "description": "Update a holiday. All fields are optional. is_optional and is_override use 'Y'/'N' (VARCHAR(1))."
           }
         },
         {
@@ -2300,12 +3341,485 @@
                 "{{holidayId}}"
               ]
             }
-          }
+          },
+          "description": "Delete a holiday by ID."
         }
       ]
     },
     {
-      "name": "Attendance - Leaves",
+      "name": "Calendars",
+      "item": [
+        {
+          "name": "Resolve Employee Calendar",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/resolve/{{empid}}?year=2024",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "resolve",
+                "{{empid}}"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "2024",
+                  "description": "Required: Year"
+                }
+              ]
+            }
+          },
+          "description": "Resolve calendar for an employee (shows inheritance hierarchy). Query param: year (required)."
+        },
+        {
+          "name": "Get Monthly Calendar for Employee",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/monthly/employee/{{empid}}?year=2024&month=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "monthly",
+                "employee",
+                "{{empid}}"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "2024"
+                },
+                {
+                  "key": "month",
+                  "value": "12"
+                }
+              ]
+            }
+          },
+          "description": "Get monthly calendar view for an employee. Query params: year, month (required)."
+        },
+        {
+          "name": "Get Monthly Calendar for Organization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/monthly/organization?year=2024&month=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "monthly",
+                "organization"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "2024"
+                },
+                {
+                  "key": "month",
+                  "value": "12"
+                }
+              ]
+            }
+          },
+          "description": "Get monthly calendar view for organization. Query params: year, month (required)."
+        },
+        {
+          "name": "Get Monthly Calendar for Location",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/monthly/location/{{locationId}}?year=2024&month=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "monthly",
+                "location",
+                "{{locationId}}"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "2024"
+                },
+                {
+                  "key": "month",
+                  "value": "12"
+                }
+              ]
+            }
+          },
+          "description": "Get monthly calendar view for a location. Query params: year, month (required)."
+        },
+        {
+          "name": "Get Monthly Calendar for Department",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/monthly/department/{{deptid}}?year=2024&month=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "monthly",
+                "department",
+                "{{deptid}}"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "2024"
+                },
+                {
+                  "key": "month",
+                  "value": "12"
+                }
+              ]
+            }
+          },
+          "description": "Get monthly calendar view for a department. Query params: year, month (required)."
+        },
+        {
+          "name": "Check Working Day",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/working-day/{{empid}}?date=2024-12-20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "working-day",
+                "{{empid}}"
+              ],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2024-12-20",
+                  "description": "Required: Date in YYYY-MM-DD format"
+                }
+              ]
+            }
+          },
+          "description": "Check if a specific date is a working day for an employee. Query param: date (YYYY-MM-DD, required)."
+        },
+        {
+          "name": "Get Working Days",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/working-days/{{empid}}?start_date=2024-01-01&end_date=2024-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "working-days",
+                "{{empid}}"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2024-01-01",
+                  "description": "Required: Start date in YYYY-MM-DD format"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2024-12-31",
+                  "description": "Required: End date in YYYY-MM-DD format"
+                }
+              ]
+            }
+          },
+          "description": "Get working days for a date range. Query params: start_date, end_date (YYYY-MM-DD, required)."
+        },
+        {
+          "name": "Get Calendars",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars?calendar_type=ORGANIZATION&year=2024",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars"
+              ],
+              "query": [
+                {
+                  "key": "calendar_type",
+                  "value": "ORGANIZATION",
+                  "description": "Required: ORGANIZATION, LOCATION, DEPARTMENT, or EMPLOYEE"
+                },
+                {
+                  "key": "year",
+                  "value": "2024",
+                  "description": "Optional: Filter by year"
+                },
+                {
+                  "key": "location_id",
+                  "value": "{{locationId}}",
+                  "description": "Optional: For LOCATION type"
+                },
+                {
+                  "key": "department_id",
+                  "value": "{{deptid}}",
+                  "description": "Optional: For DEPARTMENT type"
+                },
+                {
+                  "key": "empid",
+                  "value": "{{empid}}",
+                  "description": "Optional: For EMPLOYEE type"
+                }
+              ]
+            }
+          },
+          "description": "Get calendars by level. Query params: calendar_type (required), year (optional), location_id/department_id/empid (optional based on type)."
+        },
+        {
+          "name": "Get Calendar by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/{{calendarId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "{{calendarId}}"
+              ]
+            }
+          },
+          "description": "Get a specific calendar by ID with all details (holidays, weekly offs, date overrides)."
+        },
+        {
+          "name": "Create Organization Calendar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"calendar_name\": \"2024 Organization Calendar\",\n  \"calendar_type\": \"ORGANIZATION\",\n  \"year\": 2024,\n  \"description\": \"Main organization calendar\"\n}"
+            },
+            "description": "Create an organization calendar. calendar_name, calendar_type, and year are required. No orgid required (single org system)."
+          }
+        },
+        {
+          "name": "Create Location Calendar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"calendar_name\": \"2024 Location Calendar\",\n  \"calendar_type\": \"LOCATION\",\n  \"year\": 2024,\n  \"location_id\": 1,\n  \"description\": \"Location calendar\"\n}"
+            },
+            "description": "Create a location calendar. calendar_name, calendar_type, year, and location_id are required."
+          }
+        },
+        {
+          "name": "Add Holidays to Calendar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/{{calendarId}}/holidays",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "{{calendarId}}",
+                "holidays"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"holidays\": [\n    {\n      \"holiday_date\": \"2024-12-25\",\n      \"holiday_name\": \"Christmas\",\n      \"is_optional\": \"N\",\n      \"is_override\": \"N\",\n      \"description\": \"Christmas holiday\"\n    }\n  ]\n}"
+            },
+            "description": "Add holidays to a calendar. Body: holidays array with holiday_date, holiday_name (required), is_optional, is_override, description (optional)."
+          }
+        },
+        {
+          "name": "Add Weekly Offs to Calendar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/{{calendarId}}/weekly-offs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "{{calendarId}}",
+                "weekly-offs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"weekly_offs\": [\n    {\n      \"day_of_week\": 7,\n      \"is_override\": \"N\"\n    }\n  ]\n}"
+            },
+            "description": "Add weekly offs to a calendar. Body: weekly_offs array with day_of_week (1=Monday, 7=Sunday, required), is_override (optional)."
+          }
+        },
+        {
+          "name": "Update Calendar",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/{{calendarId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "{{calendarId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"calendar_name\": \"Updated Calendar Name\",\n  \"is_active\": \"Y\",\n  \"description\": \"Updated description\"\n}"
+            },
+            "description": "Update a calendar. All fields are optional: calendar_name, description, is_active ('Y' or 'N')."
+          }
+        },
+        {
+          "name": "Delete Calendar",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/calendars/{{calendarId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "calendars",
+                "{{calendarId}}"
+              ]
+            }
+          },
+          "description": "Delete a calendar by ID (cascades to holidays, weekly offs, and date overrides)."
+        }
+      ]
+    },
+    {
+      "name": "Leaves - Leave Requests",
       "item": [
         {
           "name": "Get All Leaves",
@@ -2318,7 +3832,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/leaves?employee_id={{employeeId}}&from=2024-01-01&to=2024-12-31&status=pending",
+              "raw": "{{baseUrl}}/leaves?empid={{empid}}&from=2024-01-01&to=2024-12-31&status=pending",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2327,14 +3841,14 @@
               ],
               "query": [
                 {
-                  "key": "employee_id",
-                  "value": "{{employeeId}}",
-                  "description": "Employee ID (required if manager_id not provided)"
+                  "key": "empid",
+                  "value": "{{empid}}",
+                  "description": "Employee ID (VARCHAR(10)) - required if manager_id not provided"
                 },
                 {
                   "key": "manager_id",
                   "value": "",
-                  "description": "Manager ID - Get leaves for all team members (required if employee_id not provided)",
+                  "description": "Manager empid (VARCHAR(10)) - Get leaves for all team members (required if empid not provided)",
                   "disabled": true
                 },
                 {
@@ -2355,7 +3869,7 @@
               ]
             }
           },
-          "description": "Get leave requests. Either employee_id OR manager_id must be provided (not both). Use manager_id to get leaves for all team members."
+          "description": "Get leave requests. Either empid OR manager_id must be provided (not both). Use manager_id to get leaves for all team members. Uses empid (VARCHAR(10)) instead of numeric ID."
         },
         {
           "name": "Get Leave by ID",
@@ -2400,8 +3914,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"employee_id\": \"EMP-001\",\n  \"start_date\": \"2024-12-20\",\n  \"end_date\": \"2024-12-25\",\n  \"leave_type\": \"annual\",\n  \"reason\": \"Vacation\"\n}"
-            }
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"leavetype_id\": \"CAS\",\n  \"start_date\": \"2024-12-20\",\n  \"end_date\": \"2024-12-25\",\n  \"reason\": \"Vacation\"\n}"
+            },
+            "description": "Create a leave request. Uses empid (VARCHAR(10)) and leavetype_id (VARCHAR(3)). total_days is automatically calculated from start_date and end_date."
           }
         },
         {
@@ -2426,8 +3941,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"approved\"\n}"
-            }
+              "raw": "{\n  \"start_date\": \"2024-12-21\",\n  \"end_date\": \"2024-12-26\",\n  \"leavetype_id\": \"CAS\",\n  \"reason\": \"Updated reason\"\n}"
+            },
+            "description": "Update leave request (only PENDING leaves can be updated). Can update start_date, end_date, leavetype_id, and reason. total_days is automatically recalculated."
           }
         },
         {
@@ -2453,8 +3969,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approved_by\": 1\n}"
-            }
+              "raw": "{\n  \"approved_by\": \"MGR001\"\n}"
+            },
+            "description": "Approve a leave request. approved_by should be the empid (VARCHAR(10)) of the approver. Only PENDING leaves can be approved."
           }
         },
         {
@@ -2480,9 +3997,410 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"approved_by\": 1\n}"
+              "raw": "{\n  \"approved_by\": \"MGR001\",\n  \"rejection_reason\": \"Insufficient leave balance\"\n}"
+            },
+            "description": "Reject a leave request. approved_by should be the empid (VARCHAR(10)) of the approver. rejection_reason is optional. Only PENDING leaves can be rejected."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Leaves - Leave Types",
+      "item": [
+        {
+          "name": "Get All Leave Types",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types?is_active=Y",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types"
+              ],
+              "query": [
+                {
+                  "key": "is_active",
+                  "value": "Y",
+                  "description": "Filter by active status: Y or N (VARCHAR(1))",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get all leave types. HR Manager/Admin only for creation/modification. Uses leavetype_id (VARCHAR(3)) as primary key."
+        },
+        {
+          "name": "Get Available Leave Types for Employee",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types/available",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types",
+                "available"
+              ]
+            }
+          },
+          "description": "Get available (active) leave types. Returns all active leave types."
+        },
+        {
+          "name": "Get Leave Type by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types/{{leaveTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types",
+                "{{leaveTypeId}}"
+              ]
+            }
+          },
+          "description": "Get leave type by leavetype_id (VARCHAR(3))."
+        },
+        {
+          "name": "Create Leave Type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leavetype_id\": \"ML\",\n  \"name\": \"Maternity Leave\",\n  \"description\": \"Maternity leave for female employees\",\n  \"max_leaves_per_year\": 180,\n  \"carry_forward\": \"N\",\n  \"max_carry_forward\": 0,\n  \"requires_approval\": \"Y\",\n  \"requires_medical_certificate\": \"Y\",\n  \"is_active\": \"Y\"\n}"
+            }
+          },
+          "description": "Create a new leave type. HR Manager/Admin only. Uses leavetype_id (VARCHAR(3)) as primary key. All boolean fields use 'Y'/'N' (VARCHAR(1))."
+        },
+        {
+          "name": "Update Leave Type",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types/{{leaveTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types",
+                "{{leaveTypeId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"max_leaves_per_year\": 200,\n  \"is_active\": \"Y\"\n}"
+            }
+          },
+          "description": "Update a leave type. HR Manager/Admin only. Uses leavetype_id (VARCHAR(3)). is_active uses 'Y'/'N'."
+        },
+        {
+          "name": "Deactivate Leave Type",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/leave-types/{{leaveTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "leave-types",
+                "{{leaveTypeId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": \"N\"\n}"
+            }
+          },
+          "description": "Deactivate a leave type by setting is_active to 'N'. HR Manager/Admin only. Uses leavetype_id (VARCHAR(3))."
+        }
+      ]
+    },
+    {
+      "name": "Attendance - Corrections",
+      "item": [
+        {
+          "name": "Get My Correction Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/corrections?empid={{empid}}&status=PENDING",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "corrections"
+              ],
+              "query": [
+                {
+                  "key": "empid",
+                  "value": "{{empid}}",
+                  "description": "Employee ID (VARCHAR(10)) - required"
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "description": "Filter by status: PENDING, APPROVED, REJECTED"
+                },
+                {
+                  "key": "from_date",
+                  "value": "",
+                  "description": "Start date filter (YYYY-MM-DD)",
+                  "disabled": true
+                },
+                {
+                  "key": "to_date",
+                  "value": "",
+                  "description": "End date filter (YYYY-MM-DD)",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get all attendance correction requests for an employee. Required: empid. Optional: status (PENDING, APPROVED, REJECTED), from_date, to_date."
+        },
+        {
+          "name": "Get Pending Correction Requests (Manager/HR)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/corrections/pending?manager_empid={{managerEmpid}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "corrections",
+                "pending"
+              ],
+              "query": [
+                {
+                  "key": "manager_empid",
+                  "value": "{{managerEmpid}}",
+                  "description": "Manager empid - Get requests for all team members",
+                  "disabled": true
+                },
+                {
+                  "key": "empid",
+                  "value": "",
+                  "description": "Employee empid - Get requests for specific employee",
+                  "disabled": true
+                },
+                {
+                  "key": "from_date",
+                  "value": "",
+                  "description": "Start date filter (YYYY-MM-DD)",
+                  "disabled": true
+                },
+                {
+                  "key": "to_date",
+                  "value": "",
+                  "description": "End date filter (YYYY-MM-DD)",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get all pending correction requests for review. Query params: manager_empid (get all team requests) OR empid (specific employee). Optional: from_date, to_date."
+        },
+        {
+          "name": "Get Correction Request by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/corrections/{{correctionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "corrections",
+                "{{correctionId}}"
+              ]
             }
           }
+        },
+        {
+          "name": "Create Correction Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/corrections",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "corrections"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"attendance_record_id\": null,\n  \"correction_date\": \"2024-12-20\",\n  \"requested_check_in\": \"2024-12-20 09:00:00\",\n  \"requested_check_out\": \"2024-12-20 17:00:00\",\n  \"reason\": \"Forgot to clock in\"\n}"
+            }
+          },
+          "description": "Create a new attendance correction request. Required: empid (VARCHAR(10)), correction_date, reason. Optional: attendance_record_id (null if no record exists for the date), requested_check_in, requested_check_out. If attendance_record_id is null, a new attendance record will be created when approved."
+        },
+        {
+          "name": "Approve Correction Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/corrections/{{correctionId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "corrections",
+                "{{correctionId}}",
+                "approve"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approved_by\": \"MGR001\",\n  \"remarks\": \"Approved - correction verified\"\n}"
+            },
+            "description": "Approve a correction request. Required: approved_by (empid VARCHAR(10)). Optional: remarks. Creates new attendance record if attendance_record_id is null, otherwise updates existing record. Only the employee's manager can approve."
+          }
+        },
+        {
+          "name": "Reject Correction Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/corrections/{{correctionId}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "corrections",
+                "{{correctionId}}",
+                "reject"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approved_by\": \"MGR001\",\n  \"rejection_reason\": \"Insufficient justification\"\n}"
+            }
+          },
+          "description": "Reject a correction request. Required: approved_by (empid VARCHAR(10)), rejection_reason. Only the employee's manager can reject."
+        },
+        {
+          "name": "Cancel Correction Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/corrections/{{correctionId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "corrections",
+                "{{correctionId}}",
+                "cancel"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empid\": \"EMP001\"\n}"
+            }
+          },
+          "description": "Cancel a pending correction request. Required: empid (VARCHAR(10)). Employee can only cancel their own requests. The request will be deleted since there's no 'cancelled' status."
         }
       ]
     },
@@ -2773,7 +4691,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/attendance?work_date=2024-12-20&employee_id={{employeeId}}&status=present",
+              "raw": "{{baseUrl}}/attendance?attendance_date=2024-12-20&empid={{empid}}&status=PRESENT",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2782,36 +4700,53 @@
               ],
               "query": [
                 {
-                  "key": "work_date",
+                  "key": "attendance_date",
                   "value": "2024-12-20",
-                  "description": "Specific date (YYYY-MM-DD) - can also use 'date' parameter"
+                  "description": "Specific date (YYYY-MM-DD)"
                 },
                 {
-                  "key": "employee_id",
-                  "value": "{{employeeId}}",
-                  "description": "Employee ID (cannot be used with manager_id)"
+                  "key": "empid",
+                  "value": "{{empid}}",
+                  "description": "Employee ID (VARCHAR(10)) - cannot be used with manager_id"
                 },
                 {
                   "key": "manager_id",
                   "value": "",
-                  "description": "Manager ID - Get attendance for all team members (cannot be used with employee_id)",
+                  "description": "Manager ID - Get attendance for all team members (cannot be used with empid)",
                   "disabled": true
                 },
                 {
                   "key": "status",
-                  "value": "present",
-                  "description": "Filter by status: present, absent, half_day, on_leave, week_off, holiday"
-                },
-                {
-                  "key": "approved_by",
-                  "value": "",
-                  "description": "Filter by approver ID",
-                  "disabled": true
+                  "value": "PRESENT",
+                  "description": "Filter by status: PRESENT, ABSENT, HALF_DAY, LATE, EARLY_LEAVE"
                 }
               ]
             }
           },
-          "description": "Get attendance records. Either employee_id OR manager_id can be provided (not both). Use manager_id to get attendance for all team members."
+          "description": "Get attendance records. Either empid OR manager_id can be provided (not both). Uses attendance_date instead of work_date, empid instead of employee_id. Status values: PRESENT, ABSENT, HALF_DAY, LATE, EARLY_LEAVE. No approved_by filter (removed from schema)."
+        },
+        {
+          "name": "Get Attendance Record by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/{{attendanceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "{{attendanceId}}"
+              ]
+            }
+          },
+          "description": "Get a specific attendance record by ID. Returns record with empid, attendance_date, check_in_time, check_out_time, break_start_time, break_end_time, total_work_hours, status, is_late, is_early_leave, late_minutes, early_leave_minutes, remarks, and shiftid. No organization_id required."
         },
         {
           "name": "Clock In",
@@ -2835,8 +4770,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"employee_id\": \"EMP-001\",\n  \"work_date\": \"2024-12-20\",\n  \"clock_in\": \"2024-12-20 09:00:00\",\n  \"source\": \"web\"\n}"
-            }
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"attendance_date\": \"2024-12-20\",\n  \"check_in_time\": \"2024-12-20 09:00:00\",\n  \"shiftid\": \"SHIFT001\"\n}"
+            },
+            "description": "Clock in. Required: empid (VARCHAR(10)), attendance_date, check_in_time. Optional: shiftid. Uses check_in_time instead of clock_in, attendance_date instead of work_date. No source field (removed from schema)."
           }
         },
         {
@@ -2861,8 +4797,9 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"employee_id\": \"EMP-001\",\n  \"work_date\": \"2024-12-20\",\n  \"clock_out\": \"2024-12-20 17:00:00\",\n  \"source\": \"web\"\n}"
-            }
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"attendance_date\": \"2024-12-20\",\n  \"check_out_time\": \"2024-12-20 17:00:00\"\n}"
+            },
+            "description": "Clock out. Required: empid (VARCHAR(10)), attendance_date, check_out_time. Uses check_out_time instead of clock_out, attendance_date instead of work_date. No source field (removed from schema)."
           }
         },
         {
@@ -2887,9 +4824,118 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"status\": \"present\",\n  \"notes\": \"Updated notes\"\n}"
-            }
+              "raw": "{\n  \"status\": \"PRESENT\",\n  \"check_in_time\": \"2024-12-20 09:00:00\",\n  \"check_out_time\": \"2024-12-20 17:00:00\",\n  \"break_start_time\": \"2024-12-20 13:00:00\",\n  \"break_end_time\": \"2024-12-20 14:00:00\",\n  \"shiftid\": \"SHIFT001\",\n  \"total_work_hours\": 7.0,\n  \"is_late\": \"N\",\n  \"is_early_leave\": \"N\",\n  \"late_minutes\": 0,\n  \"early_leave_minutes\": 0,\n  \"remarks\": \"Updated remarks\"\n}"
+            },
+            "description": "Update attendance record. All fields optional. Status: PRESENT, ABSENT, HALF_DAY, LATE, EARLY_LEAVE. Uses check_in_time/check_out_time instead of clock_in/clock_out, break_start_time/break_end_time instead of break_minutes, remarks instead of notes, total_work_hours instead of worked_minutes, shiftid instead of shift_id. New fields: is_late, is_early_leave, late_minutes, early_leave_minutes."
           }
+        },
+        {
+          "name": "Regularize Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/{{attendanceId}}/regularize",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "{{attendanceId}}",
+                "regularize"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"correction_date\": \"2024-12-20\",\n  \"requested_check_in\": \"2024-12-20 09:00:00\",\n  \"requested_check_out\": \"2024-12-20 17:00:00\",\n  \"reason\": \"Forgot to clock in\"\n}"
+            },
+            "description": "Create a regularization/correction request for an attendance record. Required: empid (VARCHAR(10)), correction_date, reason. Optional: requested_check_in, requested_check_out. Creates a record in attendance_correction_requests table."
+          }
+        },
+        {
+          "name": "Get Team Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance/team/summary?manager_id={{managerId}}&attendance_date=2024-12-20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance",
+                "team",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "manager_id",
+                  "value": "{{managerId}}",
+                  "description": "Manager ID (required)"
+                },
+                {
+                  "key": "attendance_date",
+                  "value": "2024-12-20",
+                  "description": "Date (YYYY-MM-DD) - defaults to today if not provided"
+                }
+              ]
+            }
+          },
+          "description": "Get attendance summary for all team members reporting to a manager. Returns summary with empid, employee_code, employee_name, employee_email, status, check_in_time, check_out_time, break_start_time, break_end_time, total_work_hours, is_late, is_early_leave, late_minutes, early_leave_minutes. Uses attendance_date instead of work_date."
+        }
+      ]
+    },
+    {
+      "name": "Attendance - Calendar",
+      "item": [
+        {
+          "name": "Get Attendance Calendar",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendance-calendar?empid={{empid}}&month=11&year=2025",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendance-calendar"
+              ],
+              "query": [
+                {
+                  "key": "empid",
+                  "value": "{{empid}}",
+                  "description": "Required: Employee ID"
+                },
+                {
+                  "key": "month",
+                  "value": "11",
+                  "description": "Required: Month (1-12)"
+                },
+                {
+                  "key": "year",
+                  "value": "2025",
+                  "description": "Required: Year"
+                }
+              ]
+            }
+          },
+          "description": "Generate comprehensive attendance calendar for an employee for a given month and year. Combines calendar data (working days, holidays, weekly offs from org/location/dept/employee levels), attendance records, and leave records. Returns a comprehensive view of each day with calendar status, attendance details, and leave information."
         }
       ]
     },
@@ -3122,6 +5168,498 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "item": [
+        {
+          "name": "Get All Documents",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/documents?categoryid=CONTRACTS&status=ACTIVE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents"
+              ],
+              "query": [
+                {
+                  "key": "categoryid",
+                  "value": "CONTRACTS",
+                  "description": "Filter by categoryid (VARCHAR(10))",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "ACTIVE",
+                  "description": "Filter by status: ACTIVE, DRAFT, ARCHIVED, EXPIRED",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get all documents with optional filters. Uses categoryid (VARCHAR(10))."
+        },
+        {
+          "name": "Get Document by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/documents/{{documentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents",
+                "{{documentId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "documents"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"document_code\": \"DOC001\",\n  \"title\": \"Employee Handbook\",\n  \"description\": \"Company employee handbook\",\n  \"categoryid\": \"POLICIES\",\n  \"document_type\": \"pdf\",\n  \"file_url\": \"/uploads/documents/handbook.pdf\",\n  \"is_template\": \"N\",\n  \"is_confidential\": \"N\",\n  \"requires_acknowledgment\": \"Y\",\n  \"status\": \"ACTIVE\"\n}"
+            }
+          },
+          "description": "Create a new document. Uses categoryid (VARCHAR(10)). All boolean fields use 'Y'/'N'."
+        },
+        {
+          "name": "Get Employee Documents",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{empid}}/documents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{empid}}",
+                "documents"
+              ]
+            }
+          },
+          "description": "Get all documents for a specific employee. Uses empid (VARCHAR(10))."
+        }
+      ]
+    },
+    {
+      "name": "Reports & Analytics",
+      "item": [
+        {
+          "name": "Get All Report Templates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reports/templates?report_type=ATTENDANCE&is_active=Y",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "templates"
+              ],
+              "query": [
+                {
+                  "key": "report_type",
+                  "value": "ATTENDANCE",
+                  "description": "Filter by report type",
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": "Y",
+                  "description": "Filter by active status: Y or N",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get all report templates. Uses templateid (VARCHAR(10)) as primary key."
+        },
+        {
+          "name": "Create Saved Report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reports/saved",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "saved"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateid\": \"RPT001\",\n  \"name\": \"Monthly Attendance Report\",\n  \"report_type\": \"ATTENDANCE\",\n  \"parameters\": {\n    \"from_date\": \"2024-01-01\",\n    \"to_date\": \"2024-01-31\",\n    \"department_id\": \"DEPT001\"\n  },\n  \"is_shared\": \"N\"\n}"
+            }
+          },
+          "description": "Create a saved report with parameters. Uses templateid (VARCHAR(10)) and deptid for department_id."
+        },
+        {
+          "name": "Execute Report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reports/execute",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "execute"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateid\": \"RPT001\",\n  \"parameters\": {\n    \"from_date\": \"2024-01-01\",\n    \"to_date\": \"2024-01-31\"\n  },\n  \"export_format\": \"PDF\"\n}"
+            }
+          },
+          "description": "Execute a report. Export formats: PDF, EXCEL, CSV, JSON."
+        },
+        {
+          "name": "Get Dashboard Widgets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reports/dashboard/widgets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "dashboard",
+                "widgets"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/reports/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "dashboard"
+              ]
+            }
+          },
+          "description": "Get current user's dashboard configuration."
+        }
+      ]
+    },
+    {
+      "name": "Onboarding & Offboarding",
+      "item": [
+        {
+          "name": "Get Onboarding Checklists",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/onboarding/checklists?department_id=DEPT001&is_active=Y",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "onboarding",
+                "checklists"
+              ],
+              "query": [
+                {
+                  "key": "department_id",
+                  "value": "DEPT001",
+                  "description": "Filter by deptid (VARCHAR(10))",
+                  "disabled": true
+                },
+                {
+                  "key": "is_active",
+                  "value": "Y",
+                  "description": "Filter by active status: Y or N",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get onboarding checklists. Uses checklistid (VARCHAR(10)) and deptid for department_id."
+        },
+        {
+          "name": "Create Onboarding Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/onboarding/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "onboarding",
+                "sessions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"checklistid\": \"ONB001\",\n  \"start_date\": \"2024-01-15\",\n  \"expected_completion_date\": \"2024-01-30\",\n  \"assigned_to\": \"EMP002\"\n}"
+            }
+          },
+          "description": "Create an onboarding session. Uses empid and checklistid (VARCHAR(10))."
+        },
+        {
+          "name": "Get Onboarding Session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/onboarding/sessions/{{empid}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "onboarding",
+                "sessions",
+                "{{empid}}"
+              ]
+            }
+          },
+          "description": "Get onboarding session for an employee. Uses empid (VARCHAR(10))."
+        },
+        {
+          "name": "Complete Onboarding Task",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/onboarding/tasks/{{taskId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "onboarding",
+                "tasks",
+                "{{taskId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"COMPLETED\",\n  \"notes\": \"Task completed successfully\",\n  \"attachment_url\": \"/uploads/tasks/attachment.pdf\"\n}"
+            }
+          },
+          "description": "Update onboarding task completion status. Status: PENDING, IN_PROGRESS, COMPLETED, SKIPPED, BLOCKED."
+        },
+        {
+          "name": "Get Equipment Issuance",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{empid}}/equipment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{empid}}",
+                "equipment"
+              ]
+            }
+          },
+          "description": "Get equipment issued to an employee. Uses empid (VARCHAR(10))."
+        },
+        {
+          "name": "Issue Equipment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/employees/{{empid}}/equipment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "employees",
+                "{{empid}}",
+                "equipment"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"equipment_type\": \"LAPTOP\",\n  \"equipment_name\": \"Dell Latitude 5420\",\n  \"serial_number\": \"SN123456\",\n  \"issued_date\": \"2024-01-15\",\n  \"condition_on_issue\": \"NEW\"\n}"
+            }
+          },
+          "description": "Issue equipment to an employee during onboarding. Uses empid (VARCHAR(10))."
+        },
+        {
+          "name": "Get Offboarding Sessions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/offboarding/sessions?empid={{empid}}&status=IN_PROGRESS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "offboarding",
+                "sessions"
+              ],
+              "query": [
+                {
+                  "key": "empid",
+                  "value": "{{empid}}",
+                  "description": "Filter by empid (VARCHAR(10))",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "IN_PROGRESS",
+                  "description": "Filter by status",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "description": "Get offboarding sessions. Uses empid (VARCHAR(10))."
+        },
+        {
+          "name": "Create Offboarding Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/offboarding/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "offboarding",
+                "sessions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"empid\": \"EMP001\",\n  \"checklistid\": \"OFF001\",\n  \"separation_type\": \"RESIGNATION\",\n  \"last_working_date\": \"2024-12-31\",\n  \"notice_period_days\": 30,\n  \"start_date\": \"2024-12-01\",\n  \"reason_for_leaving\": \"Personal reasons\"\n}"
+            }
+          },
+          "description": "Create an offboarding session. Uses empid and checklistid (VARCHAR(10)). Separation types: RESIGNATION, TERMINATION, RETIREMENT, CONTRACT_END."
         }
       ]
     },

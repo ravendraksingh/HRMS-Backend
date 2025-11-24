@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { SignJWT, jwtVerify, EncryptJWT, jwtDecrypt } = require("jose");
 const crypto = require("crypto");
+const pool = require("../db");
 
 // Get JWT_SECRET from environment variables (required)
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -23,7 +24,7 @@ const secretKey = crypto.createSecretKey(keyBuffer);
 
 // Generate access token (short-lived)
 function generateAccessToken(payload) {
-//   console.log("ACCESS_TOKEN_EXPIRY:", ACCESS_TOKEN_EXPIRY);
+  //   console.log("ACCESS_TOKEN_EXPIRY:", ACCESS_TOKEN_EXPIRY);
   return jwt.sign(payload, JWT_SECRET, {
     expiresIn: ACCESS_TOKEN_EXPIRY,
   });
@@ -72,8 +73,50 @@ function requireAdminRole(req, res, next) {
   next();
 }
 
+/**
+ * Middleware to check if user is HR Manager or Admin
+ * Checks user roles from database
+ */
+async function requireHrManagerOrAdmin(req, res, next) {
+//   console.log("requireHrManagerOrAdmin req.user:", req.user);
+  if (!req.user) {
+    return res.status(401).json({ error: "Authentication required." });
+  }
+  
+  try {
+    const empId = req.user.empid;
+
+    // Get user roles
+    const [roles] = await pool.query(
+      `SELECT r.roleid
+       FROM user_roles ur 
+       JOIN roles r ON ur.roleid = r.roleid 
+       WHERE ur.empid = ?`,
+      [empId]
+    );
+    // console.log("roles:", roles);
+    const roleIds = roles.map((r) => r.roleid);
+    const isAdmin = roleIds.includes("ADMIN");
+    const isHrManager = roleIds.includes("HRMANAGER");
+
+    // console.log("isAdmin:", isAdmin);
+    // console.log("isHrManager:", isHrManager);
+
+    if (!isAdmin && !isHrManager) {
+      return res.status(403).json({
+        error: "HR Manager or Admin access required.",
+      });
+    }
+
+    next();
+  } catch (error) {
+    return res.status(500).json({ error: "Error checking user roles." });
+  }
+}
+
 module.exports = {
   requireAdminRole,
+  requireHrManagerOrAdmin,
   generateAccessToken,
   generateRefreshToken,
   hashRefreshToken,

@@ -3,116 +3,317 @@ const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../util/ApiError");
 
+/**
+ * GET /locations
+ * Get all office locations
+ */
 router.get("/", async (req, res, next) => {
-  const organization_id = req.organizationId;
   try {
-    const query = "SELECT id, name, address_line1, address_line2, city, state, postal_code, country, phone " + 
-        "FROM office_locations WHERE organization_id = ? ORDER BY name ASC";
-    const [rows] = await pool.query(query, [organization_id]);
-    res.json({ locations: rows });
+    const [locations] = await pool.query(
+      "SELECT * FROM office_locations ORDER BY name ASC"
+    );
+    res.json({ locations });
   } catch (err) {
     next(err);
   }
 });
 
+/**
+ * GET /locations/:id
+ * Get office location by ID
+ */
 router.get("/:id", async (req, res, next) => {
-  const organization_id = req.organizationId;
   try {
-    const [rows] = await pool.query("SELECT * FROM office_locations WHERE id = ? AND organization_id = ?", 
-        [req.params.id, organization_id]);
-    if (rows.length === 0) throw new ApiError("Location not found", 404);
-    res.json(rows[0]);
+    const [[location]] = await pool.query(
+      "SELECT * FROM office_locations WHERE id = ?",
+      [req.params.id]
+    );
+
+    if (!location) {
+      throw new ApiError("Location not found", 404);
+    }
+
+    res.json({ location });
   } catch (err) {
     next(err);
   }
 });
 
+/**
+ * POST /locations
+ * Create a new office location
+ */
 router.post("/", async (req, res, next) => {
-  const organization_id = req.organizationId;
-  const { name, address_line1, address_line2, city, state, postal_code, country, phone } = req.body;
+  const {
+    name,
+    address_line1,
+    address_line2,
+    city,
+    state,
+    postal_code,
+    country,
+    phone,
+  } = req.body;
+
   try {
-    if (!name) {
-      throw new ApiError("name is required", 400);
+    // Validate required fields
+    if (!name || !address_line1 || !city || !state || !postal_code || !country) {
+      throw new ApiError(
+        "name, address_line1, city, state, postal_code, and country are required",
+        400
+      );
     }
-    const [result] = await pool.query(
-      "INSERT INTO office_locations (organization_id, name, address_line1, address_line2, city, state, postal_code, country, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [organization_id, name, address_line1, address_line2, city, state, postal_code, country, phone]
+
+    // Check if name already exists (unique constraint)
+    const [[existing]] = await pool.query(
+      "SELECT id FROM office_locations WHERE name = ?",
+      [name]
     );
-    res.status(201).json({ id: result.insertId });
+
+    if (existing) {
+      throw new ApiError(
+        `Location with name '${name}' already exists`,
+        400
+      );
+    }
+
+    // Insert location
+    const [result] = await pool.query(
+      `INSERT INTO office_locations 
+       (name, address_line1, address_line2, city, state, postal_code, country, phone) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        name,
+        address_line1,
+        address_line2 || null,
+        city,
+        state,
+        postal_code,
+        country,
+        phone || null,
+      ]
+    );
+
+    // Fetch created location
+    const [[location]] = await pool.query(
+      "SELECT * FROM office_locations WHERE id = ?",
+      [result.insertId]
+    );
+
+    res.status(201).json({
+      message: "Location created successfully",
+      location,
+    });
   } catch (err) {
     next(err);
   }
 });
 
+/**
+ * PATCH /locations/:id
+ * Update an office location
+ */
 router.patch("/:id", async (req, res, next) => {
-  const organization_id = req.organizationId;
-  const { name, address_line1, address_line2, city, state, postal_code, country, phone } = req.body;
+  const { id } = req.params;
+  const {
+    name,
+    address_line1,
+    address_line2,
+    city,
+    state,
+    postal_code,
+    country,
+    phone,
+  } = req.body;
+
   try {
-    const [result] = await pool.query(
-      "UPDATE office_locations SET name = COALESCE(?, name), address_line1 = COALESCE(?, address_line1), address_line2 = COALESCE(?, address_line2), city = COALESCE(?, city), state = COALESCE(?, state), postal_code = COALESCE(?, postal_code), country = COALESCE(?, country), phone = COALESCE(?, phone) WHERE id = ? AND organization_id = ?",
-      [name, address_line1, address_line2, city, state, postal_code, country, phone, req.params.id, organization_id]
+    // Check if location exists
+    const [[existing]] = await pool.query(
+      "SELECT id FROM office_locations WHERE id = ?",
+      [id]
     );
-    if (result.affectedRows === 0) {
-      throw new ApiError("Location not found or access denied", 404);
+
+    if (!existing) {
+      throw new ApiError("Location not found", 404);
     }
-    res.json({ updated: true });
+
+    // Build update query
+    const updates = [];
+    const params = [];
+
+    if (name !== undefined) {
+      // Check if new name conflicts with existing name
+      const [[nameConflict]] = await pool.query(
+        "SELECT id FROM office_locations WHERE name = ? AND id != ?",
+        [name, id]
+      );
+
+      if (nameConflict) {
+        throw new ApiError(
+          `Location with name '${name}' already exists`,
+          400
+        );
+      }
+
+      updates.push("name = ?");
+      params.push(name);
+    }
+
+    if (address_line1 !== undefined) {
+      updates.push("address_line1 = ?");
+      params.push(address_line1);
+    }
+
+    if (address_line2 !== undefined) {
+      updates.push("address_line2 = ?");
+      params.push(address_line2 || null);
+    }
+
+    if (city !== undefined) {
+      updates.push("city = ?");
+      params.push(city);
+    }
+
+    if (state !== undefined) {
+      updates.push("state = ?");
+      params.push(state);
+    }
+
+    if (postal_code !== undefined) {
+      updates.push("postal_code = ?");
+      params.push(postal_code);
+    }
+
+    if (country !== undefined) {
+      updates.push("country = ?");
+      params.push(country);
+    }
+
+    if (phone !== undefined) {
+      updates.push("phone = ?");
+      params.push(phone || null);
+    }
+
+    if (updates.length === 0) {
+      throw new ApiError("No fields to update", 400);
+    }
+
+    params.push(id);
+
+    const [result] = await pool.query(
+      `UPDATE office_locations SET ${updates.join(", ")} WHERE id = ?`,
+      params
+    );
+
+    if (result.affectedRows === 0) {
+      throw new ApiError("Failed to update location", 500);
+    }
+
+    // Fetch updated location
+    const [[location]] = await pool.query(
+      "SELECT * FROM office_locations WHERE id = ?",
+      [id]
+    );
+
+    res.json({
+      message: "Location updated successfully",
+      location,
+    });
   } catch (err) {
     next(err);
   }
 });
 
+/**
+ * DELETE /locations/:id
+ * Delete an office location
+ * Note: Check if location is in use before deleting
+ */
 router.delete("/:id", async (req, res, next) => {
-  const organization_id = req.organizationId;
+  const { id } = req.params;
+
   try {
-    const [result] = await pool.query(
-      "DELETE FROM office_locations WHERE id = ? AND organization_id = ?",
-      [req.params.id, organization_id]
+    // Check if location exists
+    const [[existing]] = await pool.query(
+      "SELECT id FROM office_locations WHERE id = ?",
+      [id]
     );
-    if (result.affectedRows === 0) {
-      throw new ApiError("Location not found or access denied", 404);
+
+    if (!existing) {
+      throw new ApiError("Location not found", 404);
     }
-    res.status(204).send();
+
+    // Check if location is assigned to any employees
+    const [[inUse]] = await pool.query(
+      "SELECT COUNT(*) as count FROM employees WHERE location_id = ?",
+      [id]
+    );
+
+    if (inUse.count > 0) {
+      throw new ApiError(
+        `Cannot delete location. It is assigned to ${inUse.count} employee(s). Please reassign employees first.`,
+        400
+      );
+    }
+
+    // Delete location
+    const [result] = await pool.query(
+      "DELETE FROM office_locations WHERE id = ?",
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      throw new ApiError("Failed to delete location", 500);
+    }
+
+    res.json({ message: "Location deleted successfully" });
   } catch (err) {
     next(err);
   }
 });
 
-// Attach location to employee
-router.post("/:id/assign-employee/:employeeId", async (req, res, next) => {
-  const organization_id = req.organizationId;
+/**
+ * POST /locations/:id/assign-employee/:empid
+ * Assign a location to an employee
+ */
+router.post("/:id/assign-employee/:empid", async (req, res, next) => {
+  const { id, empid } = req.params;
+
   try {
-    const locationId = req.params.id;
-    const employeeId = req.params.employeeId;
-    
-    // Validate location belongs to organization
-    const [[loc]] = await pool.query(
-      "SELECT id FROM office_locations WHERE id = ? AND organization_id = ?",
-      [locationId, organization_id]
+    // Validate location exists
+    const [[location]] = await pool.query(
+      "SELECT id, name FROM office_locations WHERE id = ?",
+      [id]
     );
-    if (!loc) {
-      throw new ApiError("Location not found or access denied", 404);
+
+    if (!location) {
+      throw new ApiError("Location not found", 404);
     }
-    
-    // Validate employee belongs to organization
-    const [[emp]] = await pool.query(
-      "SELECT id FROM employees WHERE id = ? AND organization_id = ?",
-      [employeeId, organization_id]
+
+    // Validate employee exists
+    const [[employee]] = await pool.query(
+      "SELECT empid, name FROM employees WHERE empid = ?",
+      [empid]
     );
-    if (!emp) {
-      throw new ApiError("Employee not found or access denied", 404);
+
+    if (!employee) {
+      throw new ApiError("Employee not found", 404);
     }
-    
+
     // Update employee location
     await pool.query(
-      "UPDATE employees SET location_id = ? WHERE id = ? AND organization_id = ?",
-      [locationId, employeeId, organization_id]
+      "UPDATE employees SET location_id = ? WHERE empid = ?",
+      [id, empid]
     );
-    res.json({ assigned: true });
+
+    res.json({
+      message: "Location assigned successfully",
+      location: { id: location.id, name: location.name },
+      employee: { empid: employee.empid, name: employee.name },
+    });
   } catch (err) {
     next(err);
   }
 });
 
 module.exports = router;
-
-

@@ -2,7 +2,7 @@
 
 **Human Resource Management System - Backend**
 
-A comprehensive Human Resource Management System (HRMS) backend built with Node.js, Express.js, and MySQL. This system supports multi-tenant architecture, allowing multiple organizations to use the same application instance with complete data isolation.
+A comprehensive Human Resource Management System (HRMS) backend built with Node.js, Express.js, and MySQL.
 
 ## Table of Contents
 
@@ -16,6 +16,7 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
   - [Employees](#employees)
   - [Manager Dashboard](#manager-dashboard)
   - [Attendance](#attendance)
+  - [Calendars](#calendars)
   - [Leaves](#leaves)
   - [Health Check](#health-check)
 - [Environment Variables](#environment-variables)
@@ -31,112 +32,92 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
 
 ## Features
 
-- **Multi-Tenant Architecture**: Support for multiple organizations with complete data isolation
 - **JWT Authentication**: Secure token-based authentication with refresh tokens
 - **Employee Management**: Complete CRUD operations for employees, departments, and locations
 - **Attendance Tracking**: Clock in/out, leave management, overtime tracking, and shift management
+- **Calendar System**: Hierarchical calendar system (Organization → Location → Department → Employee) with holidays, weekly offs, and date overrides
+- **Comprehensive Attendance Calendar**: Combined view of calendar, attendance records, and leaves for each day
 - **Manager Dashboard**: Comprehensive team management APIs for managers
 - **Role-Based Access Control**: Flexible user roles and permissions
-- **Structured Logging**: Winston-based logging with daily log rotation
+- **Logging**: Logging is currently disabled (no-op logger)
 - **RESTful API**: Well-structured REST endpoints following industry best practices
 
 ## Tech Stack
 
 - **Runtime**: Node.js
 - **Framework**: Express.js 5.x
-- **Database**: MySQL 8.0+ / PostgreSQL 12+
+- **Database**: MySQL 8.0+
 - **Authentication**: JWT (JSON Web Tokens)
-- **Logging**: Winston with daily log rotation
+- **Logging**: Disabled (no-op logger)
 - **Password Hashing**: bcrypt
 
 ## Prerequisites
 
 - Node.js (v14 or higher)
-- MySQL 8.0+ or PostgreSQL 12+
+- MySQL 8.0+
 - npm or yarn
 
 ## Installation
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/ravendraksingh/HRMS-Backend.git
    cd HRMS-Backend
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Set up environment variables**
-   
+
    Create a `.env` file in the root directory:
+
    ```env
    # JWT Configuration (REQUIRED)
    JWT_SECRET=your_generated_secret_here_minimum_32_characters
-   
+
    # Database Configuration
    DB_HOST=localhost
    DB_PORT=3306
    DB_USER=your_db_user
    DB_PASSWORD=your_db_password
    DB_NAME=hrms_backend
-   
+
    # Server Configuration
    PORT=8080
    NODE_ENV=development
-   
+
    # Logging (Optional)
    LOG_LEVEL=debug
    ENABLE_FILE_LOGGING=true
    ```
 
    Generate JWT_SECRET:
+
    ```bash
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```
 
 4. **Set up the database**
-   
-   **Option 1: Use consolidated schema (Recommended for new setups)**
-   
-   For MySQL:
+
+   Run the schema file to create all tables:
+
    ```bash
-   mysql -u your_user -p your_database < sql/01_setup_mysql.sql
-   ```
-   
-   For PostgreSQL:
-   ```bash
-   psql -U your_user -d your_database -f sql/01_setup_postgresql.sql
-   ```
-   
-   **Option 2: Use individual schema files (if needed)**
-   
-   Run the SQL schema files in order:
-   ```bash
-   # Run main schema
    mysql -u your_user -p your_database < sql/schema.sql
-   
-   # Run organization schema
-   mysql -u your_user -p your_database < sql/organizations/schema.sql
-   mysql -u your_user -p your_database < sql/organizations/01_organizations.sql
-   
-   # Run employees schema
-   mysql -u your_user -p your_database < sql/employees/schema.sql
-   mysql -u your_user -p your_database < sql/employees/00_employees.sql
-   # ... continue with other schema files
-   
-   # Run migrations
-   mysql -u your_user -p your_database < sql/migrations/007_rename_department_to_department_id.sql
    ```
 
-   See `sql/SETUP_INSTRUCTIONS.md` for detailed setup instructions for both MySQL and PostgreSQL.
+   This will create all necessary tables with the correct structure.
 
 5. **Start the server**
+
    ```bash
    # Development mode (with auto-reload)
    npm run dev
-   
+
    # Production mode
    npm start
    ```
@@ -148,7 +129,7 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
 ```
 HRMS-Backend/
 ├── config/
-│   └── logger.js              # Winston logger configuration
+│   └── logger.js              # No-op logger (logging disabled)
 ├── middlewares/
 │   ├── authenticateJWT.js     # JWT authentication middleware
 │   ├── errorHandler.js        # Global error handler
@@ -159,6 +140,7 @@ HRMS-Backend/
 │   ├── admin/                 # Admin routes
 │   ├── attendance/            # Attendance management routes
 │   ├── auth/                  # Authentication routes
+│   ├── calendar/              # Calendar management routes (holidays, calendars)
 │   ├── departments/          # Department management routes
 │   ├── employees/             # Employee management routes
 │   ├── managers/              # Manager dashboard routes
@@ -168,12 +150,7 @@ HRMS-Backend/
 │   ├── status/                # Health check routes
 │   └── users/                  # User management routes
 ├── sql/
-│   ├── migrations/            # Database migrations
-│   ├── attendance/            # Attendance schema
-│   ├── departments/           # Department schema
-│   ├── employees/             # Employee schema
-│   ├── organizations/          # Organization schema
-│   └── users/                 # User schema
+│   └── schema.sql             # Complete database schema
 ├── util/
 │   ├── ApiError.js            # Custom error class
 │   ├── authUtil.js            # Authentication utilities
@@ -222,6 +199,34 @@ See `MANAGER_TEAM_DASHBOARD_APIS.md` for detailed manager API documentation.
 - `GET /attendance` - Get attendance records
 - `GET /attendance/:id` - Get attendance record by ID
 - `PATCH /attendance/:id` - Update attendance record
+- `GET /attendance-calendar` - Get comprehensive attendance calendar (combines calendar, attendance, and leaves)
+
+### Calendars
+
+- `GET /calendars` - Get calendars by level (ORGANIZATION, LOCATION, DEPARTMENT, EMPLOYEE)
+- `GET /calendars/:id` - Get calendar by ID with holidays, weekly offs, and date overrides
+- `POST /calendars` - Create a new calendar
+- `PATCH /calendars/:id` - Update calendar
+- `DELETE /calendars/:id` - Delete calendar
+- `POST /calendars/:id/holidays` - Add holidays to calendar
+- `POST /calendars/:id/weekly-offs` - Add weekly offs to calendar
+- `GET /calendars/resolve/:empid` - Resolve employee calendar (shows inheritance hierarchy)
+- `GET /calendars/monthly/organization` - Get monthly calendar for organization
+- `GET /calendars/monthly/location/:location_id` - Get monthly calendar for location
+- `GET /calendars/monthly/department/:department_id` - Get monthly calendar for department
+- `GET /calendars/monthly/employee/:empid` - Get monthly calendar for employee
+- `GET /calendars/working-day/:empid` - Check if a date is a working day
+- `GET /calendars/working-days/:empid` - Get working days for a date range
+
+### Holidays
+
+- `GET /holidays` - Get all holidays for a calendar (requires calendar_id)
+- `GET /holidays/:id` - Get holiday by ID
+- `POST /holidays` - Create a new holiday
+- `PATCH /holidays/:id` - Update holiday
+- `DELETE /holidays/:id` - Delete holiday
+
+See `docs/CALENDAR_SYSTEM.md` for detailed calendar system documentation.
 
 ### Leaves
 
@@ -230,6 +235,7 @@ See `MANAGER_TEAM_DASHBOARD_APIS.md` for detailed manager API documentation.
 - `PATCH /leaves/:id` - Update leave request
 - `POST /leaves/:id/approve` - Approve leave
 - `POST /leaves/:id/reject` - Reject leave
+- `GET /employees/:empid/leaves/summary` - Get leave summary for an employee
 
 ### Health Check
 
@@ -258,32 +264,23 @@ See `ENV_SETUP.md` for detailed environment variable documentation.
 
 ## Logging
 
-The application uses Winston for structured logging:
+Logging is currently disabled in the application. A no-op logger is used that silently ignores all logging calls. This removes logging dependencies and reduces overhead.
 
-- **Console Logging**: Enabled in all environments with colorized output in development
-- **File Logging**: Enabled in production or when `ENABLE_FILE_LOGGING=true`
-  - Combined logs: `logs/combined-YYYY-MM-DD.log` (14 days retention)
-  - Error logs: `logs/error-YYYY-MM-DD.log` (30 days retention)
-- **Log Levels**: debug, info, warn, error
-- **Log Format**: JSON in files, human-readable in console
-
-Logs include context such as:
-- Organization ID (for multi-tenant tracking)
-- User ID
-- Request method and path
-- Error stack traces
+To re-enable logging in the future, you can:
+1. Install a logging library of your choice
+2. Replace the no-op logger in `config/logger.js` with your chosen logging implementation
+3. Uncomment logging middleware in `server.js` if needed
 
 ## Database Design
 
-The system uses a multi-tenant architecture with shared database and shared schema. See `MULTI_TENANT_DESIGN.md` for detailed design documentation.
+The system uses a single-tenant architecture with a clean, normalized database schema.
 
 ### Key Features
 
-- Surrogate primary keys (`id`) for all tables
-- Business keys (`employee_code`, `department_code`) for real-world identifiers
-- Composite unique constraints for multi-tenant isolation
-- Composite indexes for optimized queries
-- Organization context enforced at application layer
+- `employee_code` (VARCHAR(10)) as primary key in `employee_master` table
+- All module tables follow `<module>_master` naming convention
+- Foreign keys reference `employee_code` where applicable
+- Optimized indexes for query performance
 
 ## Testing
 
@@ -316,7 +313,6 @@ This uses `nodemon` for automatic server restart on file changes.
 - JWT tokens for authentication
 - Password hashing with bcrypt (10 salt rounds)
 - Sensitive fields are redacted in logs
-- Organization context isolation
 - SQL injection prevention via parameterized queries
 - CORS configuration for frontend access
 
@@ -360,8 +356,5 @@ You can also open an issue in the repository for bug reports or feature requests
 ### Documentation
 
 For technical documentation, please refer to:
-- `ENV_SETUP.md` - Environment setup
-- `MULTI_TENANT_DESIGN.md` - Database design
-- `MANAGER_TEAM_DASHBOARD_APIS.md` - Manager API documentation
-- `sql/migrations/README.md` - Database migrations
-- `sql/SETUP_INSTRUCTIONS.md` - Database setup instructions
+
+- `docs/CALENDAR_SYSTEM.md` - Calendar system documentation (hierarchical calendars, holidays, weekly offs)

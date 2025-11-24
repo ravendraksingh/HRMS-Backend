@@ -1,6 +1,4 @@
 const ApiError = require("../util/ApiError");
-const logger = require("../config/logger");
-
 /**
  * 404 Not Found Handler
  * 
@@ -24,13 +22,6 @@ function notFoundHandler(req, res, next) {
     `Route ${req.method} ${req.originalUrl} not found`,
     404
   );
-
-  // Log the 404 for monitoring
-  logger.warn('Route not found', {
-    method: req.method,
-    path: req.originalUrl,
-    organization_id: req.organizationId || null,
-  });
 
   // Pass to error handler
   next(error);

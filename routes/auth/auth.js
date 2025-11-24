@@ -5,7 +5,6 @@ const pool = require("../../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const ApiError = require("../../util/ApiError");
-const logger = require("../../config/logger");
 const {
   generateAccessToken,
   generateRefreshToken,
@@ -40,68 +39,53 @@ router.post("/login", async (req, res, next) => {
     const verified = await verifyPassword(password, user.password);
     if (!verified) throw new ApiError("Invalid credentials", 400);
 
+    // Check if user is active
+    if (user.is_active !== "Y") {
+      throw new ApiError("User account is inactive", 403);
+    }
+
     // Update last_login timestamp for this user
     const updateQuery =
       "UPDATE users SET last_login = NOW() WHERE username = ?";
     await pool.query(updateQuery, [username]);
 
     // Fetch employee details
-    const [[emp]] = await pool.query("SELECT * FROM employees WHERE id = ?", [
-      user.employee_id,
-    ]);
+    const [[emp]] = await pool.query(
+      "SELECT * FROM employees WHERE empid = ?",
+      [user.empid]
+    );
 
     if (!emp) {
       throw new ApiError("Employee not found for this user", 404);
     }
 
-    // Fetch organization details
-    const [[org]] = await pool.query(
-      "SELECT id, code, name FROM organizations WHERE id = ?",
-      [user.organization_id]
-    );
-
-    if (!org) {
-      throw new ApiError("Organization not found for this user", 404);
-    }
-
     // Fetch user roles
     const [roles] = await pool.query(
-      `SELECT r.id, r.name, r.code, r.description 
-       FROM user_roles ur 
-       JOIN roles r ON ur.role_id = r.id 
-       WHERE ur.user_id = ?`,
-      [user.id]
+      `SELECT r.roleid FROM user_roles ur 
+       JOIN roles r ON ur.roleid = r.roleid 
+       WHERE ur.empid = ?`,
+      [user.empid]
     );
 
+    let userRoles = [];
+    if (roles && roles.length > 0) {
+      userRoles = roles.map((r) => r.roleid);
+    }
+    
     // Build comprehensive userDetails object with snake_case
     const userDetails = {
-      user_id: user.id,
       username: user.username,
-      organization_id: user.organization_id,
-      organization_code: org.code,
-      organization_name: org.name,
-      employee_id: user.employee_id,
-      employee_name: emp.name,
-      employee_email: emp.email,
-      employee_code: emp.employee_code,
-      is_active: user.is_active === 1,
-      roles: roles.map((r) => ({
-        role_name: r.name,
-        role_code: r.code,
-        // description: r.description,
-      })),
+      name: emp.name,
+      empid: user.empid,
       last_login: user.last_login,
+      roles: userRoles || [],   
     };
 
     // Build JWT payload with essential info (using snake_case for consistency)
     const jwtPayload = {
-      user_id: user.id,
       username: user.username,
-      organization_id: user.organization_id,
-      organization_code: org.code,
-      employee_id: user.employee_id,
-      //   employee_code: emp.employee_code,
-      roles: roles.map((r) => r.code), // Include role codes in JWT
+      empid: user.empid,
+      roles: userRoles || [],
     };
 
     // Generate Tokens
@@ -116,16 +100,9 @@ router.post("/login", async (req, res, next) => {
     // Store refresh token in database
     await pool.query(
       `INSERT INTO refresh_tokens 
-       (user_id, organization_id, token, device_info, ip_address, expires_at) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        user.id,
-        user.organization_id,
-        hashedRefreshToken,
-        req.headers["user-agent"] || null,
-        req.ip || req.connection.remoteAddress || null,
-        expiresAt,
-      ]
+       (empid, token, expires_at) 
+       VALUES (?, ?, ?)`,
+      [user.empid, hashedRefreshToken, expiresAt]
     );
 
     // Set tokens in HTTP-only cookies (secure for production)
@@ -154,35 +131,32 @@ router.post("/login", async (req, res, next) => {
       user: userDetails,
     });
   } catch (error) {
-    logger.error("Database error during login", {
-      error: error.message,
-      stack: error.stack,
-    });
     next(error);
   }
 });
 
 router.post("/register", async (req, res, next) => {
-  const { username, password, employee_id, is_active, role } = req.body;
+  const { empid, username, password, is_active } = req.body;
   try {
+    // Validate required fields
+    if (!empid || !username || !password) {
+      throw new ApiError("empid, username, and password are required", 400);
+    }
+
     // Hash the password with salt rounds (10 is a good default)
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
+
     // Insert new user with hashed password in the database
     const query =
-      "INSERT INTO users (username, password, is_active, employee_id, role) VALUES (?, ?, ?, ?, ?)";
-    const params = [username, hashedPassword, is_active, employee_id, role];
+      "INSERT INTO users (empid, username, password, is_active) VALUES (?, ?, ?, ?)";
+    const params = [empid, username, hashedPassword, is_active || "N"];
     await pool.query(query, params);
 
     res
       .status(201)
       .json({ success: true, message: "User registered successfully" });
   } catch (error) {
-    logger.error("Registration error", {
-      error: error.message,
-      stack: error.stack,
-      username: username,
-    });
     next(error);
   }
 });
@@ -201,21 +175,19 @@ router.post("/updatePassword", async (req, res, next) => {
       .status(200)
       .json({ success: true, message: "Password updated successfully" });
   } catch (error) {
-    logger.error("Password update error", {
-      error: error.message,
-      stack: error.stack,
-      username: username,
-    });
     next(error);
   }
 });
 
-router.get("/users/:id", async (req, res, next) => {
-  const id = req.params.id;
+router.get("/users/:empid", async (req, res, next) => {
+  const empid = req.params.empid;
   try {
-    const query = "SELECT * FROM users WHERE id = ?";
-    const [[user]] = await pool.query(query, [id]);
-    logger.debug("User fetched", { user_id: id });
+    const query = "SELECT * FROM users WHERE empid = ?";
+    const [[user]] = await pool.query(query, [empid]);
+
+    if (!user) {
+      throw new ApiError("User not found", 404);
+    }
 
     res.status(200).json(user);
   } catch (error) {
@@ -243,13 +215,13 @@ router.post("/refresh", async (req, res, next) => {
 
     // Find valid refresh token in database
     const [[tokenRecord]] = await pool.query(
-      `SELECT rt.user_id, rt.organization_id, u.username, u.is_active
+      `SELECT rt.empid, u.username, u.is_active
          FROM refresh_tokens rt
-         INNER JOIN users u ON rt.user_id = u.id
+         INNER JOIN users u ON rt.empid = u.empid
          WHERE rt.token = ? 
            AND rt.revoked_at IS NULL 
            AND rt.expires_at > NOW()
-           AND u.is_active = 1`,
+           AND u.is_active = 'Y'`,
       [hashedToken]
     );
 
@@ -259,8 +231,8 @@ router.post("/refresh", async (req, res, next) => {
 
     // Fetch user details again (in case roles changed)
     const [[user]] = await pool.query(
-      "SELECT * FROM users WHERE id = ? AND is_active = 1",
-      [tokenRecord.user_id]
+      "SELECT * FROM users WHERE empid = ? AND is_active = 'Y'",
+      [tokenRecord.empid]
     );
 
     if (!user) {
@@ -268,41 +240,28 @@ router.post("/refresh", async (req, res, next) => {
     }
 
     // Fetch employee details
-    const [[emp]] = await pool.query("SELECT * FROM employees WHERE id = ?", [
-      user.employee_id,
-    ]);
+    const [[emp]] = await pool.query(
+      "SELECT * FROM employees WHERE empid = ?",
+      [user.empid]
+    );
 
     if (!emp) {
       return next(new ApiError("Employee not found for this user", 404));
     }
 
-    // Fetch organization details
-    const [[org]] = await pool.query(
-      "SELECT id, code, name FROM organizations WHERE id = ?",
-      [user.organization_id]
-    );
-
-    if (!org) {
-      return next(new ApiError("Organization not found for this user", 404));
-    }
-
     // Fetch user roles
     const [roles] = await pool.query(
-      `SELECT r.code FROM user_roles ur 
-         JOIN roles r ON ur.role_id = r.id 
-         WHERE ur.user_id = ?`,
-      [user.id]
+      `SELECT r.roleid FROM user_roles ur 
+         JOIN roles r ON ur.roleid = r.roleid 
+         WHERE ur.empid = ?`,
+      [user.empid]
     );
 
     // Generate new access token with updated user info
     const jwtPayload = {
-      user_id: user.id,
       username: user.username,
-      organization_id: user.organization_id,
-      organization_code: org.code,
-      //   employee_id: user.employee_id,
-      //   employee_code: emp.employee_code,
-      roles: roles.map((r) => r.code),
+      empid: user.empid,
+      roles: roles ? roles.map((r) => r.roleid) : [],
     };
 
     const accessToken = generateAccessToken(jwtPayload);
@@ -324,10 +283,6 @@ router.post("/refresh", async (req, res, next) => {
       expires_in: 900, // 15 minutes in seconds
     });
   } catch (error) {
-    logger.error("Refresh token error", {
-      error: error.message,
-      stack: error.stack,
-    });
     next(error);
   }
 });

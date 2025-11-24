@@ -1,5 +1,4 @@
 const { verifyAccessToken } = require("../util/authUtil");
-const logger = require("../config/logger");
 
 async function authenticateJWT(req, res, next) {
   let token = null;
@@ -29,7 +28,7 @@ async function authenticateJWT(req, res, next) {
     req.user = decoded;
     next();
   } catch (err) {
-    logger.warn("JWT authentication failed", {
+    console.warn("JWT authentication failed", {
       error: err.message,
       name: err.name,
     });

@@ -2,16 +2,13 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../util/ApiError");
-const { resolveEmployeeNumericId } = require("../../util/employeeUtil");
-
 /**
  * GET /attendance/weekly-off
  * Get weekly off configurations
  * Query params: year, month, employee_id, department_id
  */
 router.get("/", async (req, res, next) => {
-  const organization_id = req.organizationId;
-  const { year, month, employee_id, department_id } = req.query;
+    const { year, month, employee_id, department_id } = req.query;
 
   try {
     const where = ["organization_id = ?"];
@@ -28,7 +25,7 @@ router.get("/", async (req, res, next) => {
     
     // Filter by employee_id if provided
     if (employee_id) {
-      const employeeNumericId = await resolveEmployeeNumericId(employee_id, organization_id);
+      const employeeNumericId = employee_id;
       where.push("employee_id = ?");
       params.push(employeeNumericId);
     }
@@ -43,7 +40,6 @@ router.get("/", async (req, res, next) => {
     const [rows] = await pool.query(
       `SELECT 
         id,
-        organization_id,
         year,
         month,
         employee_id,
@@ -74,14 +70,12 @@ router.get("/", async (req, res, next) => {
  * Get a specific weekly off configuration by ID
  */
 router.get("/:id", async (req, res, next) => {
-  const organization_id = req.organizationId;
-  const { id } = req.params;
+    const { id } = req.params;
 
   try {
     const [[weeklyOff]] = await pool.query(
       `SELECT 
         id,
-        organization_id,
         year,
         month,
         employee_id,
@@ -90,8 +84,8 @@ router.get("/:id", async (req, res, next) => {
         created_at,
         updated_at
       FROM attendance_weekly_off 
-      WHERE id = ? AND organization_id = ?`,
-      [id, organization_id]
+      WHERE id = ?`,
+      [id]
     );
 
     if (!weeklyOff) {
@@ -111,8 +105,7 @@ router.get("/:id", async (req, res, next) => {
  * Body: { year, month, employee_id (optional), department_id (optional), days_of_week: [0,6] }
  */
 router.post("/", async (req, res, next) => {
-  const organization_id = req.organizationId;
-  const { year, month, employee_id, department_id, days_of_week } = req.body;
+    const { year, month, employee_id, department_id, days_of_week } = req.body;
 
   try {
     // Validation
@@ -149,18 +142,17 @@ router.post("/", async (req, res, next) => {
 
     let employeeNumericId = null;
     if (employee_id) {
-      employeeNumericId = await resolveEmployeeNumericId(employee_id, organization_id);
+      employeeNumericId = employee_id;
     }
 
     // Check if configuration already exists
     const [[existing]] = await pool.query(
       `SELECT id FROM attendance_weekly_off 
-       WHERE organization_id = ? 
-       AND year = ? 
+       WHERE year = ? 
        AND month = ? 
        AND COALESCE(employee_id, 0) = COALESCE(?, 0)
        AND COALESCE(department_id, 0) = COALESCE(?, 0)`,
-      [organization_id, yearNum, monthNum, employeeNumericId, department_id ? parseInt(department_id) : null]
+      [ yearNum, monthNum, employeeNumericId, department_id ? parseInt(department_id) : null]
     );
 
     if (existing) {
@@ -170,10 +162,10 @@ router.post("/", async (req, res, next) => {
     // Insert new configuration
     const [result] = await pool.query(
       `INSERT INTO attendance_weekly_off 
-       (organization_id, year, month, employee_id, department_id, days_of_week) 
+       ( year, month, employee_id, department_id, days_of_week) 
        VALUES (?, ?, ?, ?, ?, ?)`,
       [
-        organization_id,
+        
         yearNum,
         monthNum,
         employeeNumericId,
@@ -197,8 +189,7 @@ router.post("/", async (req, res, next) => {
  * Body: { days_of_week: [0,6] } (other fields cannot be updated)
  */
 router.patch("/:id", async (req, res, next) => {
-  const organization_id = req.organizationId;
-  const { id } = req.params;
+    const { id } = req.params;
   const { days_of_week } = req.body;
 
   try {
@@ -218,8 +209,8 @@ router.patch("/:id", async (req, res, next) => {
 
     // Check if configuration exists
     const [[existing]] = await pool.query(
-      "SELECT id FROM attendance_weekly_off WHERE id = ? AND organization_id = ?",
-      [id, organization_id]
+      "SELECT id FROM attendance_weekly_off WHERE id = ?",
+      [id]
     );
 
     if (!existing) {
@@ -228,8 +219,8 @@ router.patch("/:id", async (req, res, next) => {
 
     // Update configuration
     const [result] = await pool.query(
-      "UPDATE attendance_weekly_off SET days_of_week = ?, updated_at = NOW() WHERE id = ? AND organization_id = ?",
-      [JSON.stringify(days_of_week), id, organization_id]
+      "UPDATE attendance_weekly_off SET days_of_week = ?, updated_at = NOW() WHERE id = ?",
+      [JSON.stringify(days_of_week), id]
     );
 
     if (result.affectedRows === 0) {
@@ -250,13 +241,12 @@ router.patch("/:id", async (req, res, next) => {
  * Delete a weekly off configuration
  */
 router.delete("/:id", async (req, res, next) => {
-  const organization_id = req.organizationId;
-  const { id } = req.params;
+    const { id } = req.params;
 
   try {
     const [result] = await pool.query(
-      "DELETE FROM attendance_weekly_off WHERE id = ? AND organization_id = ?",
-      [id, organization_id]
+      "DELETE FROM attendance_weekly_off WHERE id = ?",
+      [id]
     );
 
     if (result.affectedRows === 0) {

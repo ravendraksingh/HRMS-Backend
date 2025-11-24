@@ -7,9 +7,7 @@ const cors = require("cors");
 const morgan = require("morgan");
 const app = express();
 const cookieParser = require("cookie-parser");
-const logger = require("./config/logger");
 
-const requestLogger = require("./middlewares/requestLogger");
 const { authenticateJWT } = require("./middlewares/authenticateJWT");
 const { requireAdminRole } = require("./util/authUtil");
 
@@ -24,12 +22,14 @@ app.use(
   })
 );
 
-// HTTP request logger - use Winston stream for logging
-app.use(morgan("combined", { stream: logger.stream }));
+// HTTP request logger - uses logger stream for logging
+// LOGGING DISABLED - Uncomment below to enable logging
+// app.use(morgan("combined", { stream: logger.stream }));
 
 // Request payload logger - logs POST/PUT/PATCH request bodies
 // Must be after express.json() middleware to access req.body
-app.use(requestLogger);
+// LOGGING DISABLED - Uncomment below to enable logging
+// app.use(requestLogger);
 
 const authRoutes = require("./routes/auth/auth");
 const employeeRoutes = require("./routes/employees/employees");
@@ -41,23 +41,31 @@ const attendanceRoutes = require("./routes/attendance/attendance");
 const attendanceShiftRoutes = require("./routes/attendance/shifts");
 const attendanceShiftAssignRoutes = require("./routes/attendance/shiftAssignments");
 const attendancePolicyRoutes = require("./routes/attendance/policies");
-const attendanceHolidayRoutes = require("./routes/attendance/holidays");
-const attendanceLeaveRoutes = require("./routes/attendance/leaves");
+const calendarRoutes = require("./routes/calendar/calendars");
+const holidayRoutes = require("./routes/calendar/holidays");
+const leaveRoutes = require("./routes/leaves/leaves");
+const leaveTypesRoutes = require("./routes/leaves/leaveTypes");
+const attendanceCorrectionsRoutes = require("./routes/attendance/corrections");
 const attendanceOvertimeRoutes = require("./routes/attendance/overtime");
 const attendanceReportRoutes = require("./routes/attendance/reports");
 const attendanceWeeklyOffRoutes = require("./routes/attendance/weeklyOff");
+const attendanceCalendarRoutes = require("./routes/attendance/attendance-calendar");
 const employeePersonalRoutes = require("./routes/employees/personal");
 const employeeEducationRoutes = require("./routes/employees/education");
 const employeeEmploymentHistoryRoutes = require("./routes/employees/employmentHistory");
 const employeeFamilyRoutes = require("./routes/employees/family");
+const employeeJobInfoRoutes = require("./routes/employees/jobInformation");
+const employeePayrollRoutes = require("./routes/employees/payroll");
+const employeeComplianceRoutes = require("./routes/employees/compliance");
+const employeeLeavesRoutes = require("./routes/employees/leaves");
+const employeeSearchRoutes = require("./routes/employees/search");
+const organizationRoutes = require("./routes/organization/organization");
 const organizationLocationsRoutes = require("./routes/organization/locations");
-const organizationsRoutes = require("./routes/organizations/organizations");
 const usersRoutes = require("./routes/users/users");
 const rolesRoutes = require("./routes/users/roles");
 const onboardingRoutes = require("./routes/onboarding/onboarding");
 const statusRoutes = require("./routes/status/status");
 const { errorHandler } = require("./middlewares/errorHandler");
-const { extractOrganizationId } = require("./middlewares/organization");
 const { notFoundHandler } = require("./middlewares/notFoundHandler");
 
 const PORT = process.env.PORT || 8080;
@@ -67,39 +75,43 @@ const PORT = process.env.PORT || 8080;
 app.use("/status", statusRoutes);
 app.use("/auth", authRoutes);
 
-// Public routes (no authentication or organization context required)
-app.use("/organizations", organizationsRoutes);
-// Apply organization middleware to all routes except auth and public routes
-
 app.use(authenticateJWT);
-app.use("/employees", extractOrganizationId, employeeRoutes);
-app.use("/departments", extractOrganizationId, departmentRoutes);
-app.use("/departments", extractOrganizationId, departmentHrManagersRoutes);
-app.use("/managers", extractOrganizationId, managerRoutes);
+// Register employee search route BEFORE general employee routes
+// This prevents /employees/search from being matched by /employees/:empid
+app.use("/employees", employeeSearchRoutes);
+app.use("/employees", employeeRoutes);
+app.use("/departments", departmentRoutes);
+app.use("/departments", departmentHrManagersRoutes);
+app.use("/managers", managerRoutes);
 // Register more specific attendance routes BEFORE the general /attendance route
 // This prevents /attendance/shifts from being matched by /attendance/:id
-app.use("/attendance/shifts", extractOrganizationId, attendanceShiftRoutes);
-app.use("/attendance/policies", extractOrganizationId, attendancePolicyRoutes);
-app.use(
-  "/attendance/weekly-off",
-  extractOrganizationId,
-  attendanceWeeklyOffRoutes
-);
-app.use("/attendance", extractOrganizationId, attendanceRoutes);
-app.use("/", extractOrganizationId, attendanceShiftAssignRoutes);
-app.use("/holidays", extractOrganizationId, attendanceHolidayRoutes);
-app.use("/leaves", extractOrganizationId, attendanceLeaveRoutes);
-app.use("/overtime", extractOrganizationId, attendanceOvertimeRoutes);
-app.use("/reports", extractOrganizationId, attendanceReportRoutes);
-app.use("/", extractOrganizationId, employeePersonalRoutes);
-app.use("/", extractOrganizationId, employeeEducationRoutes);
-app.use("/", extractOrganizationId, employeeEmploymentHistoryRoutes);
-app.use("/", extractOrganizationId, employeeFamilyRoutes);
-app.use("/locations", extractOrganizationId, organizationLocationsRoutes);
-app.use("/users", extractOrganizationId, usersRoutes);
-app.use("/roles", extractOrganizationId, rolesRoutes);
-app.use("/onboarding", extractOrganizationId, onboardingRoutes);
-app.use("/admin", extractOrganizationId, adminRoutes);
+app.use("/attendance/shifts", attendanceShiftRoutes);
+app.use("/attendance/policies", attendancePolicyRoutes);
+app.use("/attendance/weekly-off", attendanceWeeklyOffRoutes);
+app.use("/attendance/corrections", attendanceCorrectionsRoutes);
+app.use("/attendance", attendanceRoutes);
+app.use("/attendance-calendar", attendanceCalendarRoutes);
+app.use("/", attendanceShiftAssignRoutes);
+app.use("/calendars", calendarRoutes);
+app.use("/holidays", holidayRoutes);
+app.use("/leaves", leaveRoutes);
+app.use("/leave-types", leaveTypesRoutes);
+app.use("/overtime", attendanceOvertimeRoutes);
+app.use("/reports", attendanceReportRoutes);
+app.use("/", employeePersonalRoutes);
+app.use("/", employeeEducationRoutes);
+app.use("/", employeeEmploymentHistoryRoutes);
+app.use("/", employeeFamilyRoutes);
+app.use("/employees", employeeJobInfoRoutes);
+app.use("/employees", employeePayrollRoutes);
+app.use("/employees", employeeComplianceRoutes);
+app.use("/employees", employeeLeavesRoutes);
+app.use("/organizations", organizationRoutes);
+app.use("/locations", organizationLocationsRoutes);
+app.use("/users", usersRoutes);
+app.use("/roles", rolesRoutes);
+app.use("/onboarding", onboardingRoutes);
+app.use("/admin", adminRoutes);
 app.use(notFoundHandler);
 // Error handler - Must be last
 app.use(errorHandler);
@@ -111,23 +123,28 @@ app.use(errorHandler);
     await connection.ping();
     connection.release();
 
-    logger.info("Connected to MySQL database", {
-      host: process.env.DB_HOST || "localhost",
-      database: process.env.DB_NAME || "ems",
-    });
+    // LOGGING DISABLED
+    // logger.info("Connected to MySQL database", {
+    //   host: process.env.DB_HOST || "localhost",
+    //   database: process.env.DB_NAME || "ems",
+    // });
 
     // Only start server after successful DB connection
     app.listen(PORT, () => {
-      logger.info(`Server listening on port ${PORT}`, {
-        port: PORT,
-        environment: process.env.NODE_ENV || "development",
-      });
+      // LOGGING DISABLED
+      // logger.info(`Server listening on port ${PORT}`, {
+      //   port: PORT,
+      //   environment: process.env.NODE_ENV || "development",
+      // });
+      console.log(`Server listening on port ${PORT}`);
     });
   } catch (error) {
-    logger.error("Unable to connect to MySQL database", {
-      error: error.message,
-      stack: error.stack,
-    });
+    // LOGGING DISABLED
+    // logger.error("Unable to connect to MySQL database", {
+    //   error: error.message,
+    //   stack: error.stack,
+    // });
+    console.error("Unable to connect to MySQL database:", error.message);
     process.exit(1); // Exit process if DB connection fails
   }
 })();

@@ -4,12 +4,9 @@ const pool = require("../../db");
 const ApiError = require("../../util/ApiError");
 
 router.get("/", async (req, res, next) => {
-  const organization_id = req.organizationId;
-
   try {
     const [rows] = await pool.query(
-      "SELECT * FROM attendance_shifts WHERE organization_id = ? ORDER BY id DESC",
-      [organization_id]
+      "SELECT * FROM attendance_shifts ORDER BY created_at DESC"
     );
     res.json({ shifts: rows });
   } catch (err) {
@@ -17,13 +14,11 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-router.get("/:id", async (req, res, next) => {
-  const organization_id = req.organizationId;
-
+router.get("/:shiftid", async (req, res, next) => {
   try {
     const [[shift]] = await pool.query(
-      "SELECT * FROM attendance_shifts WHERE id = ? AND organization_id = ?",
-      [req.params.id, organization_id]
+      "SELECT * FROM attendance_shifts WHERE shiftid = ?",
+      [req.params.shiftid]
     );
     if (!shift) throw new ApiError("Shift not found", 404);
     res.json(shift);
@@ -34,57 +29,106 @@ router.get("/:id", async (req, res, next) => {
 
 router.post("/", async (req, res, next) => {
   const {
+    shiftid,
     name,
     start_time,
     end_time,
-    is_overnight = 0,
-    grace_in_minutes = 0,
-    default_break_minutes = 0,
+    break_duration_minutes = 0,
+    grace_duration_minutes = 0,
+    total_hours,
+    is_active = "Y",
   } = req.body;
-  const organization_id = req.organizationId;
+
   try {
+    if (
+      !shiftid ||
+      !name ||
+      !start_time ||
+      !end_time ||
+      !grace_duration_minutes ||
+      !break_duration_minutes ||
+      !total_hours
+    ) {
+      throw new ApiError(
+        "shiftid, name, start_time, end_time, grace_duration_minutes, break_duration_minutes, and total_hours are required",
+        400
+      );
+    }
+
     const [result] = await pool.query(
-      "INSERT INTO attendance_shifts (organization_id, name, start_time, end_time, is_overnight, grace_in_minutes, default_break_minutes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO attendance_shifts (shiftid, name, start_time, end_time, break_duration_minutes, grace_duration_minutes, total_hours, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [
-        organization_id,
+        shiftid,
         name,
         start_time,
         end_time,
-        is_overnight,
-        grace_in_minutes,
-        default_break_minutes,
+        break_duration_minutes,
+        grace_duration_minutes,
+        total_hours,
+        is_active,
       ]
     );
-    res.status(201).json({ id: result.insertId });
+    res.status(201).json({ shiftid: shiftid });
   } catch (err) {
     next(err);
   }
 });
 
-router.patch("/:id", async (req, res, next) => {
+router.patch("/:shiftid", async (req, res, next) => {
   const {
     name,
     start_time,
     end_time,
-    is_overnight,
-    grace_in_minutes,
-    default_break_minutes,
+    break_duration_minutes,
+    grace_duration_minutes,
+    total_hours,
+    is_active,
   } = req.body;
-  const organization_id = req.organizationId;
 
   try {
+    const updates = [];
+    const params = [];
+
+    if (name !== undefined) {
+      updates.push("name = ?");
+      params.push(name);
+    }
+    if (start_time !== undefined) {
+      updates.push("start_time = ?");
+      params.push(start_time);
+    }
+    if (end_time !== undefined) {
+      updates.push("end_time = ?");
+      params.push(end_time);
+    }
+    if (break_duration_minutes !== undefined) {
+      updates.push("break_duration_minutes = ?");
+      params.push(break_duration_minutes);
+    }
+    if (grace_duration_minutes !== undefined) {
+      updates.push("grace_duration_minutes = ?");
+      params.push(grace_duration_minutes);
+    }
+    if (total_hours !== undefined) {
+      updates.push("total_hours = ?");
+      params.push(total_hours);
+    }
+    if (is_active !== undefined) {
+      updates.push("is_active = ?");
+      params.push(is_active);
+    }
+
+    if (updates.length === 0) {
+      throw new ApiError("No fields to update", 400);
+    }
+
+    params.push(req.params.shiftid);
+
     const [result] = await pool.query(
-      "UPDATE attendance_shifts SET name = COALESCE(?, name), start_time = COALESCE(?, start_time), end_time = COALESCE(?, end_time), is_overnight = COALESCE(?, is_overnight), grace_in_minutes = COALESCE(?, grace_in_minutes), default_break_minutes = COALESCE(?, default_break_minutes) WHERE id = ? AND organization_id = ?",
-      [
-        name,
-        start_time,
-        end_time,
-        is_overnight,
-        grace_in_minutes,
-        default_break_minutes,
-        req.params.id,
-        organization_id,
-      ]
+      `UPDATE attendance_shifts SET ${updates.join(
+        ", "
+      )}, updated_at = NOW() WHERE shiftid = ?`,
+      params
     );
     if (result.affectedRows === 0) throw new ApiError("Shift not found", 404);
     res.json({ updated: true });
@@ -93,13 +137,11 @@ router.patch("/:id", async (req, res, next) => {
   }
 });
 
-router.delete("/:id", async (req, res, next) => {
-  const organization_id = req.organizationId;
-
+router.delete("/:shiftid", async (req, res, next) => {
   try {
     const [result] = await pool.query(
-      "DELETE FROM attendance_shifts WHERE id = ? AND organization_id = ?",
-      [req.params.id, organization_id]
+      "DELETE FROM attendance_shifts WHERE shiftid = ?",
+      [req.params.shiftid]
     );
     if (result.affectedRows === 0) throw new ApiError("Shift not found", 404);
     res.status(204).send();

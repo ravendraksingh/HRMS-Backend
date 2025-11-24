@@ -1,5 +1,4 @@
 const ApiError = require("../util/ApiError");
-const logger = require("../config/logger");
 
 /**
  * Error handler middleware
@@ -11,18 +10,17 @@ function errorHandler(err, req, res, next) {
     method: req.method,
     path: req.originalUrl,
     status: err.status || err.statusCode || 500,
-    organization_id: req.organizationId || null,
     user_id: req.user?.id || null,
   };
 
   if (err.stack) {
-    logger.error(err.message, {
+    console.error(err.message, {
       ...logContext,
       stack: err.stack,
       error: err,
     });
   } else {
-    logger.error(err.message, logContext);
+    console.error(err.message, logContext);
   }
 
   // If response already sent, delegate to Express default error handler

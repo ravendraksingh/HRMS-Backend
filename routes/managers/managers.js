@@ -3,28 +3,15 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../util/ApiError");
-const { resolveEmployeeNumericId } = require("../../util/employeeUtil");
-
 /**
  * GET /managers/:id
- * Get manager details by ID (can be numeric ID or employee_code)
  */
 router.get("/:id", async (req, res, next) => {
-  const managerIdParam = req.params.id;
-  const organization_id = req.organizationId;
-
+  const managerId = req.params.id;
   try {
-    // Resolve manager numeric ID if employee_code is provided
-    const managerNumericId = await resolveEmployeeNumericId(
-      managerIdParam,
-      organization_id
-    );
-
-    // Get manager details with department and location info
     const [[manager]] = await pool.query(
       `SELECT 
-        e.id,
-        e.employee_code,
+        e.empid,
         e.name,
         e.email,
         e.manager_id,
@@ -34,19 +21,19 @@ router.get("/:id", async (req, res, next) => {
         e.created_at,
         e.updated_at,
         d.name as department_name,
-        d.department_code,
+        d.deptid as department_id,
         loc.name as location_name,
         m.name as manager_name,
-        m.employee_code as manager_code,
+        m.empid as manager_empid,
         hr.name as hr_manager_name,
-        hr.employee_code as hr_manager_code
+        hr.empid as hr_manager_empid
       FROM employees e
-      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN departments d ON e.department_id = d.deptid
       LEFT JOIN office_locations loc ON e.location_id = loc.id
-      LEFT JOIN employees m ON e.manager_id = m.id
-      LEFT JOIN employees hr ON e.hr_manager_id = hr.id
-      WHERE e.id = ? AND e.organization_id = ?`,
-      [managerNumericId, organization_id]
+      LEFT JOIN employees m ON e.manager_id = m.empid
+      LEFT JOIN employees hr ON e.hr_manager_id = hr.empid
+      WHERE e.empid = ?`,
+      [managerId]
     );
 
     if (!manager) {
@@ -66,19 +53,11 @@ router.get("/:id", async (req, res, next) => {
  */
 router.get("/:id/employees", async (req, res, next) => {
   const managerIdParam = req.params.id;
-  const organization_id = req.organizationId;
-
   try {
-    // Resolve manager numeric ID if employee_code is provided
-    const managerNumericId = await resolveEmployeeNumericId(
-      managerIdParam,
-      organization_id
-    );
-
     // Verify manager exists
     const [[manager]] = await pool.query(
-      "SELECT id, name FROM employees WHERE id = ? AND organization_id = ?",
-      [managerNumericId, organization_id]
+      "SELECT empid, name FROM employees WHERE empid = ?",
+      [managerIdParam]
     );
 
     if (!manager) {
@@ -88,30 +67,23 @@ router.get("/:id/employees", async (req, res, next) => {
     // Get all direct reports with full details
     const [employees] = await pool.query(
       `SELECT 
-        e.id as employee_id,
-        e.employee_code,
+        e.empid,
         e.name,
         e.email,
-        e.manager_id,
         e.hr_manager_id,
         e.department_id,
         e.location_id,
-        d.name as department_name,
-        d.department_code,
-        loc.name as location_name,
-        hr.name as hr_manager_name,
-        hr.employee_code as hr_manager_code
+        e.department_id,
+        loc.name as location_name
       FROM employees e
-      LEFT JOIN departments d ON e.department_id = d.id
       LEFT JOIN office_locations loc ON e.location_id = loc.id
-      LEFT JOIN employees hr ON e.hr_manager_id = hr.id
-      WHERE e.manager_id = ? AND e.organization_id = ?
-      ORDER BY e.name`,
-      [managerNumericId, organization_id]
+      WHERE e.manager_id = ?
+      ORDER BY e.empid`,
+      [managerIdParam]
     );
 
     res.json({
-      manager_id: managerNumericId,
+      manager_id: managerIdParam,
       manager_name: manager.name,
       employees: employees,
       count: employees.length,
@@ -128,20 +100,13 @@ router.get("/:id/employees", async (req, res, next) => {
  */
 router.get("/:id/dashboard", async (req, res, next) => {
   const managerIdParam = req.params.id;
-  const organization_id = req.organizationId;
   const { date } = req.query; // Optional date, defaults to today
 
   try {
-    // Resolve manager numeric ID
-    const managerNumericId = await resolveEmployeeNumericId(
-      managerIdParam,
-      organization_id
-    );
-
     // Verify manager exists
     const [[manager]] = await pool.query(
-      "SELECT id, name FROM employees WHERE id = ? AND organization_id = ?",
-      [managerNumericId, organization_id]
+      "SELECT empid, name FROM employees WHERE empid = ?",
+      [managerIdParam]
     );
 
     if (!manager) {
@@ -150,11 +115,11 @@ router.get("/:id/dashboard", async (req, res, next) => {
 
     // Get team members
     const [teamMembers] = await pool.query(
-      "SELECT id, employee_code, name, email FROM employees WHERE manager_id = ? AND organization_id = ?",
-      [managerNumericId, organization_id]
+      "SELECT empid, name, email FROM employees WHERE manager_id = ?",
+      [managerIdParam]
     );
 
-    const teamMemberIds = teamMembers.map((e) => e.id);
+    const teamMemberEmpids = teamMembers.map((e) => e.empid);
     const today = date || new Date().toISOString().split("T")[0]; // YYYY-MM-DD
 
     // Initialize summary
@@ -169,9 +134,9 @@ router.get("/:id/dashboard", async (req, res, next) => {
       upcoming_anniversaries: [],
     };
 
-    if (teamMemberIds.length === 0) {
+    if (teamMemberEmpids.length === 0) {
       return res.json({
-        manager_id: managerNumericId,
+        manager_id: managerIdParam,
         manager_name: manager.name,
         date: today,
         summary,
@@ -181,33 +146,28 @@ router.get("/:id/dashboard", async (req, res, next) => {
     // Get today's attendance
     const [todayAttendance] = await pool.query(
       `SELECT 
-        employee_id,
-        status,
-        clock_in,
-        clock_out
-      FROM attendance_records
-      WHERE organization_id = ? 
-        AND work_date = ? 
-        AND employee_id IN (?)
-      ORDER BY employee_id`,
-      [organization_id, today, teamMemberIds]
+        ar.empid,
+        ar.status,
+        ar.check_in_time,
+        ar.check_out_time,
+        ar.is_late
+      FROM attendance_records ar
+      WHERE ar.attendance_date = ? 
+        AND ar.empid IN (?)
+      ORDER BY ar.empid`,
+      [today, teamMemberEmpids]
     );
 
     // Count attendance status
     todayAttendance.forEach((att) => {
-      if (att.status === "present") {
+      if (att.status === "PRESENT") {
         summary.present_today++;
-        // Check if late (clock_in after 9:30 AM as example, adjust as needed)
-        if (att.clock_in) {
-          const clockInTime = new Date(att.clock_in);
-          const expectedTime = new Date(`${today}T09:30:00`);
-          if (clockInTime > expectedTime) {
-            summary.late_today++;
-          }
+        if (att.is_late === "Y") {
+          summary.late_today++;
         }
-      } else if (att.status === "absent") {
+      } else if (att.status === "ABSENT") {
         summary.absent_today++;
-      } else if (att.status === "on_leave") {
+      } else if (att.status === "HALF_DAY") {
         summary.on_leave_today++;
       }
     });
@@ -215,11 +175,10 @@ router.get("/:id/dashboard", async (req, res, next) => {
     // Get pending leave requests
     const [pendingLeaves] = await pool.query(
       `SELECT COUNT(*) as count
-      FROM attendance_leaves
-      WHERE organization_id = ? 
-        AND employee_id IN (?)
-        AND status = 'pending'`,
-      [organization_id, teamMemberIds]
+      FROM leaves
+      WHERE empid IN (?)
+        AND status = 'PENDING'`,
+      [teamMemberEmpids]
     );
 
     summary.pending_leave_requests = pendingLeaves[0]?.count || 0;
@@ -227,51 +186,46 @@ router.get("/:id/dashboard", async (req, res, next) => {
     // Get upcoming birthdays (next 30 days)
     const [birthdays] = await pool.query(
       `SELECT 
-        e.id,
-        e.employee_code,
+        e.empid,
         e.name,
-        ep.dob
+        ep.date_of_birth
       FROM employees e
-      INNER JOIN employees_personal ep ON e.id = ep.employee_id
-      WHERE e.manager_id = ? 
-        AND e.organization_id = ?
-        AND ep.dob IS NOT NULL
-        AND DATE_FORMAT(ep.dob, '%m-%d') >= DATE_FORMAT(CURDATE(), '%m-%d')
-        AND DATE_FORMAT(ep.dob, '%m-%d') <= DATE_FORMAT(DATE_ADD(CURDATE(), INTERVAL 30 DAY), '%m-%d')
-      ORDER BY DATE_FORMAT(ep.dob, '%m-%d')
+      INNER JOIN employee_personal_details ep ON e.empid = ep.empid
+      WHERE e.manager_id = ?
+        AND ep.date_of_birth IS NOT NULL
+        AND DATE_FORMAT(ep.date_of_birth, '%m-%d') >= DATE_FORMAT(CURDATE(), '%m-%d')
+        AND DATE_FORMAT(ep.date_of_birth, '%m-%d') <= DATE_FORMAT(DATE_ADD(CURDATE(), INTERVAL 30 DAY), '%m-%d')
+      ORDER BY DATE_FORMAT(ep.date_of_birth, '%m-%d')
       LIMIT 10`,
-      [managerNumericId, organization_id]
+      [managerIdParam]
     );
 
     summary.upcoming_birthdays = birthdays.map((b) => ({
-      employee_id: b.id,
-      employee_code: b.employee_code,
+      empid: b.empid,
       name: b.name,
-      dob: b.dob,
+      date_of_birth: b.date_of_birth,
     }));
 
-    // Get upcoming work anniversaries (next 30 days) - based on created_at/employment start
+    // Get upcoming work anniversaries (next 30 days) - based on doj or created_at
     const [anniversaries] = await pool.query(
       `SELECT 
-        e.id,
-        e.employee_code,
+        e.empid,
         e.name,
-        e.created_at
+        COALESCE(e.doj, e.created_at) as start_date
       FROM employees e
-      WHERE e.manager_id = ? 
-        AND e.organization_id = ?
-        AND DATE_FORMAT(e.created_at, '%m-%d') >= DATE_FORMAT(CURDATE(), '%m-%d')
-        AND DATE_FORMAT(e.created_at, '%m-%d') <= DATE_FORMAT(DATE_ADD(CURDATE(), INTERVAL 30 DAY), '%m-%d')
-      ORDER BY DATE_FORMAT(e.created_at, '%m-%d')
+      WHERE e.manager_id = ?
+        AND COALESCE(e.doj, e.created_at) IS NOT NULL
+        AND DATE_FORMAT(COALESCE(e.doj, e.created_at), '%m-%d') >= DATE_FORMAT(CURDATE(), '%m-%d')
+        AND DATE_FORMAT(COALESCE(e.doj, e.created_at), '%m-%d') <= DATE_FORMAT(DATE_ADD(CURDATE(), INTERVAL 30 DAY), '%m-%d')
+      ORDER BY DATE_FORMAT(COALESCE(e.doj, e.created_at), '%m-%d')
       LIMIT 10`,
-      [managerNumericId, organization_id]
+      [managerIdParam]
     );
 
     summary.upcoming_anniversaries = anniversaries.map((a) => ({
-      employee_id: a.id,
-      employee_code: a.employee_code,
+      empid: a.empid,
       name: a.name,
-      start_date: a.created_at,
+      start_date: a.start_date,
     }));
 
     // Calculate attendance rate (last 30 days)
@@ -281,29 +235,26 @@ router.get("/:id/dashboard", async (req, res, next) => {
 
     const [attendanceStats] = await pool.query(
       `SELECT 
-        COUNT(DISTINCT employee_id) as employees_with_records,
-        SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) as present_count,
-        SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) as absent_count,
-        SUM(CASE WHEN status = 'on_leave' THEN 1 ELSE 0 END) as on_leave_count
-      FROM attendance_records
-      WHERE organization_id = ? 
-        AND work_date >= ? 
-        AND employee_id IN (?)`,
-      [organization_id, dateFrom, teamMemberIds]
+        COUNT(DISTINCT ar.empid) as employees_with_records,
+        SUM(CASE WHEN ar.status = 'PRESENT' THEN 1 ELSE 0 END) as present_count,
+        SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END) as absent_count,
+        SUM(CASE WHEN ar.status = 'HALF_DAY' THEN 1 ELSE 0 END) as half_day_count
+      FROM attendance_records ar
+      WHERE ar.attendance_date >= ? 
+        AND ar.empid IN (?)`,
+      [dateFrom, teamMemberEmpids]
     );
 
     const stats = attendanceStats[0] || {};
     const totalRecords =
       (stats.present_count || 0) +
       (stats.absent_count || 0) +
-      (stats.on_leave_count || 0);
+      (stats.half_day_count || 0);
     const attendanceRate =
-      totalRecords > 0
-        ? ((stats.present_count || 0) / totalRecords) * 100
-        : 0;
+      totalRecords > 0 ? ((stats.present_count || 0) / totalRecords) * 100 : 0;
 
     res.json({
-      manager_id: managerNumericId,
+      manager_id: managerIdParam,
       manager_name: manager.name,
       date: today,
       summary,
@@ -311,7 +262,7 @@ router.get("/:id/dashboard", async (req, res, next) => {
       attendance_stats_30_days: {
         present: stats.present_count || 0,
         absent: stats.absent_count || 0,
-        on_leave: stats.on_leave_count || 0,
+        half_day: stats.half_day_count || 0,
         total_records: totalRecords,
       },
     });
@@ -326,38 +277,27 @@ router.get("/:id/dashboard", async (req, res, next) => {
  */
 router.get("/:id/attendance", async (req, res, next) => {
   const managerIdParam = req.params.id;
-  const organization_id = req.organizationId;
-  const { from, to, status, employee_id } = req.query;
+  const { from, to, status, empid } = req.query;
 
   try {
-    // Resolve manager numeric ID
-    const managerNumericId = await resolveEmployeeNumericId(
-      managerIdParam,
-      organization_id
-    );
-
     // Verify manager exists
     const [[manager]] = await pool.query(
-      "SELECT id, name FROM employees WHERE id = ? AND organization_id = ?",
-      [managerNumericId, organization_id]
+      "SELECT empid, name FROM employees WHERE empid = ?",
+      [managerIdParam]
     );
 
     if (!manager) {
       throw new ApiError("Manager not found", 404);
     }
 
-    // Get team member IDs
-    let teamMemberIds = [];
-    if (employee_id) {
+    // Get team member empids
+    let teamMemberEmpids = [];
+    if (empid) {
       // Filter by specific employee if provided
-      const employeeNumericId = await resolveEmployeeNumericId(
-        employee_id,
-        organization_id
-      );
       // Verify employee reports to this manager
       const [[employee]] = await pool.query(
-        "SELECT id FROM employees WHERE id = ? AND manager_id = ? AND organization_id = ?",
-        [employeeNumericId, managerNumericId, organization_id]
+        "SELECT empid FROM employees WHERE empid = ? AND manager_id = ?",
+        [empid, managerIdParam]
       );
       if (!employee) {
         throw new ApiError(
@@ -365,19 +305,19 @@ router.get("/:id/attendance", async (req, res, next) => {
           404
         );
       }
-      teamMemberIds = [employeeNumericId];
+      teamMemberEmpids = [empid];
     } else {
       // Get all team members
       const [teamMembers] = await pool.query(
-        "SELECT id FROM employees WHERE manager_id = ? AND organization_id = ?",
-        [managerNumericId, organization_id]
+        "SELECT empid FROM employees WHERE manager_id = ?",
+        [managerIdParam]
       );
-      teamMemberIds = teamMembers.map((e) => e.id);
+      teamMemberEmpids = teamMembers.map((e) => e.empid);
     }
 
-    if (teamMemberIds.length === 0) {
+    if (teamMemberEmpids.length === 0) {
       return res.json({
-        manager_id: managerNumericId,
+        manager_id: managerIdParam,
         manager_name: manager.name,
         attendance: [],
         count: 0,
@@ -385,18 +325,15 @@ router.get("/:id/attendance", async (req, res, next) => {
     }
 
     // Build query
-    const whereClauses = [
-      "ar.organization_id = ?",
-      "ar.employee_id IN (?)",
-    ];
-    const params = [organization_id, teamMemberIds];
+    const whereClauses = ["ar.empid IN (?)"];
+    const params = [teamMemberEmpids];
 
     if (from) {
-      whereClauses.push("ar.work_date >= ?");
+      whereClauses.push("ar.attendance_date >= ?");
       params.push(from);
     }
     if (to) {
-      whereClauses.push("ar.work_date <= ?");
+      whereClauses.push("ar.attendance_date <= ?");
       params.push(to);
     }
     if (status) {
@@ -410,35 +347,35 @@ router.get("/:id/attendance", async (req, res, next) => {
     const [attendance] = await pool.query(
       `SELECT 
         ar.id,
-        ar.organization_id,
-        ar.employee_id,
-        ar.work_date,
-        ar.shift_id,
-        ar.clock_in,
-        ar.clock_out,
-        ar.break_minutes,
+        ar.empid,
+        DATE_FORMAT(ar.attendance_date, '%Y-%m-%d') as attendance_date,
+        ar.shiftid,
+        DATE_FORMAT(ar.check_in_time, '%Y-%m-%d %H:%i:%s') as check_in_time,
+        DATE_FORMAT(ar.check_out_time, '%Y-%m-%d %H:%i:%s') as check_out_time,
+        DATE_FORMAT(ar.break_start_time, '%Y-%m-%d %H:%i:%s') as break_start_time,
+        DATE_FORMAT(ar.break_end_time, '%Y-%m-%d %H:%i:%s') as break_end_time,
+        ar.total_work_hours,
         ar.status,
-        ar.source,
-        ar.notes,
-        ar.approved_by,
-        ar.approved_at,
-        ar.worked_minutes,
-        ar.created_at,
-        ar.updated_at,
-        e.employee_code,
+        ar.is_late,
+        ar.is_early_leave,
+        ar.late_minutes,
+        ar.early_leave_minutes,
+        ar.remarks,
+        DATE_FORMAT(ar.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(ar.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
         e.name as employee_name,
         e.email as employee_email,
         d.name as department_name
       FROM attendance_records ar
-      LEFT JOIN employees e ON ar.employee_id = e.id
-      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN employees e ON ar.empid = e.empid
+      LEFT JOIN departments d ON e.department_id = d.deptid
       ${whereSql}
-      ORDER BY ar.work_date DESC, e.name ASC`,
+      ORDER BY ar.attendance_date DESC, e.name ASC`,
       params
     );
 
     res.json({
-      manager_id: managerNumericId,
+      manager_id: managerIdParam,
       manager_name: manager.name,
       attendance: attendance,
       count: attendance.length,
@@ -446,7 +383,113 @@ router.get("/:id/attendance", async (req, res, next) => {
         from: from || null,
         to: to || null,
         status: status || null,
-        employee_id: employee_id || null,
+        empid: empid || null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /managers/:id/attendance/corrections
+ * Get pending attendance correction requests for team members
+ */
+router.get("/:id/attendance/corrections", async (req, res, next) => {
+  const managerIdParam = req.params.id;
+  const { from_date, to_date, empid } = req.query;
+
+  try {
+    // Verify manager exists
+    const [[manager]] = await pool.query(
+      "SELECT empid, name FROM employees WHERE empid = ?",
+      [managerIdParam]
+    );
+
+    if (!manager) {
+      throw new ApiError("Manager not found", 404);
+    }
+
+    // Get team member empids
+    let teamMemberEmpids = [];
+    if (empid) {
+      // Filter by specific employee if provided
+      const [[employee]] = await pool.query(
+        "SELECT empid FROM employees WHERE empid = ? AND manager_id = ?",
+        [empid, managerIdParam]
+      );
+      if (!employee) {
+        throw new ApiError(
+          "Employee not found or doesn't report to this manager",
+          404
+        );
+      }
+      teamMemberEmpids = [empid];
+    } else {
+      // Get all team members
+      const [teamMembers] = await pool.query(
+        "SELECT empid FROM employees WHERE manager_id = ?",
+        [managerIdParam]
+      );
+      teamMemberEmpids = teamMembers.map((e) => e.empid);
+    }
+
+    if (teamMemberEmpids.length === 0) {
+      return res.json({
+        manager_id: managerIdParam,
+        manager_name: manager.name,
+        corrections: [],
+        count: 0,
+      });
+    }
+
+    // Build query
+    const whereClauses = ["acr.empid IN (?)", "acr.status = 'PENDING'"];
+    const params = [teamMemberEmpids];
+
+    if (from_date) {
+      whereClauses.push("acr.correction_date >= ?");
+      params.push(from_date);
+    }
+    if (to_date) {
+      whereClauses.push("acr.correction_date <= ?");
+      params.push(to_date);
+    }
+
+    const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
+
+    // Get pending correction requests with employee details
+    const [corrections] = await pool.query(
+      `SELECT 
+        acr.id,
+        acr.empid,
+        acr.attendance_record_id,
+        DATE_FORMAT(acr.correction_date, '%Y-%m-%d') as correction_date,
+        DATE_FORMAT(acr.requested_check_in, '%Y-%m-%d %H:%i:%s') as requested_check_in,
+        DATE_FORMAT(acr.requested_check_out, '%Y-%m-%d %H:%i:%s') as requested_check_out,
+        acr.reason,
+        acr.status,
+        DATE_FORMAT(acr.applied_at, '%Y-%m-%d') as applied_at,
+        e.name as employee_name,
+        e.email as employee_email,
+        d.name as department_name
+      FROM attendance_correction_requests acr
+      LEFT JOIN employees e ON acr.empid = e.empid
+      LEFT JOIN departments d ON e.department_id = d.deptid
+      ${whereSql}
+      ORDER BY acr.applied_at DESC`,
+      params
+    );
+
+    res.json({
+      manager_id: managerIdParam,
+      manager_name: manager.name,
+      corrections: corrections,
+      count: corrections.length,
+      filters: {
+        from_date: from_date || null,
+        to_date: to_date || null,
+        empid: empid || null,
       },
     });
   } catch (error) {
@@ -460,36 +503,25 @@ router.get("/:id/attendance", async (req, res, next) => {
  */
 router.get("/:id/leaves/pending", async (req, res, next) => {
   const managerIdParam = req.params.id;
-  const organization_id = req.organizationId;
-  const { from, to, leave_type, employee_id } = req.query;
+  const { from, to, leavetype_id, empid } = req.query;
 
   try {
-    // Resolve manager numeric ID
-    const managerNumericId = await resolveEmployeeNumericId(
-      managerIdParam,
-      organization_id
-    );
-
     // Verify manager exists
     const [[manager]] = await pool.query(
-      "SELECT id, name FROM employees WHERE id = ? AND organization_id = ?",
-      [managerNumericId, organization_id]
+      "SELECT empid, name FROM employees WHERE empid = ?",
+      [managerIdParam]
     );
 
     if (!manager) {
       throw new ApiError("Manager not found", 404);
     }
 
-    // Get team member IDs
-    let teamMemberIds = [];
-    if (employee_id) {
-      const employeeNumericId = await resolveEmployeeNumericId(
-        employee_id,
-        organization_id
-      );
+    // Get team member empids
+    let teamMemberEmpids = [];
+    if (empid) {
       const [[employee]] = await pool.query(
-        "SELECT id FROM employees WHERE id = ? AND manager_id = ? AND organization_id = ?",
-        [employeeNumericId, managerNumericId, organization_id]
+        "SELECT empid FROM employees WHERE empid = ? AND manager_id = ?",
+        [empid, managerIdParam]
       );
       if (!employee) {
         throw new ApiError(
@@ -497,18 +529,18 @@ router.get("/:id/leaves/pending", async (req, res, next) => {
           404
         );
       }
-      teamMemberIds = [employeeNumericId];
+      teamMemberEmpids = [empid];
     } else {
       const [teamMembers] = await pool.query(
-        "SELECT id FROM employees WHERE manager_id = ? AND organization_id = ?",
-        [managerNumericId, organization_id]
+        "SELECT empid FROM employees WHERE manager_id = ?",
+        [managerIdParam]
       );
-      teamMemberIds = teamMembers.map((e) => e.id);
+      teamMemberEmpids = teamMembers.map((e) => e.empid);
     }
 
-    if (teamMemberIds.length === 0) {
+    if (teamMemberEmpids.length === 0) {
       return res.json({
-        manager_id: managerNumericId,
+        manager_id: managerIdParam,
         manager_name: manager.name,
         leaves: [],
         count: 0,
@@ -516,24 +548,20 @@ router.get("/:id/leaves/pending", async (req, res, next) => {
     }
 
     // Build query
-    const whereClauses = [
-      "al.organization_id = ?",
-      "al.employee_id IN (?)",
-      "al.status = 'pending'",
-    ];
-    const params = [organization_id, teamMemberIds];
+    const whereClauses = ["l.empid IN (?)", "l.status = 'PENDING'"];
+    const params = [teamMemberEmpids];
 
     if (from) {
-      whereClauses.push("al.end_date >= ?");
+      whereClauses.push("l.end_date >= ?");
       params.push(from);
     }
     if (to) {
-      whereClauses.push("al.start_date <= ?");
+      whereClauses.push("l.start_date <= ?");
       params.push(to);
     }
-    if (leave_type) {
-      whereClauses.push("al.leave_type = ?");
-      params.push(leave_type);
+    if (leavetype_id) {
+      whereClauses.push("l.leavetype_id = ?");
+      params.push(leavetype_id);
     }
 
     const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
@@ -541,41 +569,43 @@ router.get("/:id/leaves/pending", async (req, res, next) => {
     // Get pending leave requests with employee details
     const [leaves] = await pool.query(
       `SELECT 
-        al.id,
-        al.organization_id,
-        al.employee_id,
-        al.start_date,
-        al.end_date,
-        al.leave_type,
-        al.status,
-        al.reason,
-        al.approved_by,
-        al.approved_at,
-        al.created_at,
-        al.updated_at,
-        e.employee_code,
+        l.id,
+        l.empid,
+        DATE_FORMAT(l.start_date, '%Y-%m-%d') as start_date,
+        DATE_FORMAT(l.end_date, '%Y-%m-%d') as end_date,
+        l.leavetype_id,
+        l.total_days,
+        l.status,
+        l.reason,
+        l.approved_by,
+        DATE_FORMAT(l.approved_at, '%Y-%m-%d %H:%i:%s') as approved_at,
+        DATE_FORMAT(l.applied_at, '%Y-%m-%d %H:%i:%s') as applied_at,
+        DATE_FORMAT(l.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        DATE_FORMAT(l.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
         e.name as employee_name,
         e.email as employee_email,
         d.name as department_name,
-        DATEDIFF(al.end_date, al.start_date) + 1 as days_count
-      FROM attendance_leaves al
-      LEFT JOIN employees e ON al.employee_id = e.id
-      LEFT JOIN departments d ON e.department_id = d.id
+        lt.name as leave_type_name,
+        DATEDIFF(l.end_date, l.start_date) + 1 as days_count
+      FROM leaves l
+      LEFT JOIN employees e ON l.empid = e.empid
+      LEFT JOIN departments d ON e.department_id = d.deptid
+      LEFT JOIN leave_types lt ON l.leavetype_id = lt.leavetype_id
       ${whereSql}
-      ORDER BY al.created_at DESC`,
+      ORDER BY l.created_at DESC`,
       params
     );
 
     res.json({
-      manager_id: managerNumericId,
+      manager_id: managerIdParam,
       manager_name: manager.name,
       leaves: leaves,
       count: leaves.length,
       filters: {
         from: from || null,
         to: to || null,
-        leave_type: leave_type || null,
-        employee_id: employee_id || null,
+        leavetype_id: leavetype_id || null,
+        empid: empid || null,
       },
     });
   } catch (error) {
@@ -589,20 +619,13 @@ router.get("/:id/leaves/pending", async (req, res, next) => {
  */
 router.get("/:id/analytics", async (req, res, next) => {
   const managerIdParam = req.params.id;
-  const organization_id = req.organizationId;
   const { period = "30" } = req.query; // days, default 30
 
   try {
-    // Resolve manager numeric ID
-    const managerNumericId = await resolveEmployeeNumericId(
-      managerIdParam,
-      organization_id
-    );
-
     // Verify manager exists
     const [[manager]] = await pool.query(
-      "SELECT id, name FROM employees WHERE id = ? AND organization_id = ?",
-      [managerNumericId, organization_id]
+      "SELECT empid, name FROM employees WHERE empid = ?",
+      [managerIdParam]
     );
 
     if (!manager) {
@@ -611,15 +634,15 @@ router.get("/:id/analytics", async (req, res, next) => {
 
     // Get team members
     const [teamMembers] = await pool.query(
-      "SELECT id, employee_code, name FROM employees WHERE manager_id = ? AND organization_id = ?",
-      [managerNumericId, organization_id]
+      "SELECT empid, name FROM employees WHERE manager_id = ?",
+      [managerIdParam]
     );
 
-    const teamMemberIds = teamMembers.map((e) => e.id);
+    const teamMemberEmpids = teamMembers.map((e) => e.empid);
 
-    if (teamMemberIds.length === 0) {
+    if (teamMemberEmpids.length === 0) {
       return res.json({
-        manager_id: managerNumericId,
+        manager_id: managerIdParam,
         manager_name: manager.name,
         period_days: parseInt(period),
         analytics: {
@@ -640,32 +663,30 @@ router.get("/:id/analytics", async (req, res, next) => {
     // Get attendance trends (daily breakdown)
     const [attendanceTrends] = await pool.query(
       `SELECT 
-        work_date,
+        DATE_FORMAT(ar.attendance_date, '%Y-%m-%d') as attendance_date,
         COUNT(*) as total_records,
-        SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) as present_count,
-        SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) as absent_count,
-        SUM(CASE WHEN status = 'on_leave' THEN 1 ELSE 0 END) as on_leave_count,
-        AVG(worked_minutes) as avg_work_minutes
-      FROM attendance_records
-      WHERE organization_id = ? 
-        AND work_date >= ? 
-        AND employee_id IN (?)
-      GROUP BY work_date
-      ORDER BY work_date DESC`,
-      [organization_id, dateFromStr, teamMemberIds]
+        SUM(CASE WHEN ar.status = 'PRESENT' THEN 1 ELSE 0 END) as present_count,
+        SUM(CASE WHEN ar.status = 'ABSENT' THEN 1 ELSE 0 END) as absent_count,
+        SUM(CASE WHEN ar.status = 'HALF_DAY' THEN 1 ELSE 0 END) as half_day_count,
+        AVG(ar.total_work_hours) as avg_work_hours
+      FROM attendance_records ar
+      WHERE ar.attendance_date >= ? 
+        AND ar.empid IN (?)
+      GROUP BY ar.attendance_date
+      ORDER BY ar.attendance_date DESC`,
+      [dateFromStr, teamMemberEmpids]
     );
 
     // Get attendance by status summary
     const [statusSummary] = await pool.query(
       `SELECT 
-        status,
+        ar.status,
         COUNT(*) as count
-      FROM attendance_records
-      WHERE organization_id = ? 
-        AND work_date >= ? 
-        AND employee_id IN (?)
-      GROUP BY status`,
-      [organization_id, dateFromStr, teamMemberIds]
+      FROM attendance_records ar
+      WHERE ar.attendance_date >= ? 
+        AND ar.empid IN (?)
+      GROUP BY ar.status`,
+      [dateFromStr, teamMemberEmpids]
     );
 
     const attendanceByStatus = {};
@@ -676,44 +697,37 @@ router.get("/:id/analytics", async (req, res, next) => {
     // Get average work hours
     const [workHoursStats] = await pool.query(
       `SELECT 
-        AVG(worked_minutes) as avg_work_minutes,
-        SUM(worked_minutes) as total_work_minutes,
+        AVG(ar.total_work_hours) as avg_work_hours,
+        SUM(ar.total_work_hours) as total_work_hours,
         COUNT(*) as records_with_hours
-      FROM attendance_records
-      WHERE organization_id = ? 
-        AND work_date >= ? 
-        AND employee_id IN (?)
-        AND worked_minutes IS NOT NULL`,
-      [organization_id, dateFromStr, teamMemberIds]
+      FROM attendance_records ar
+      WHERE ar.attendance_date >= ? 
+        AND ar.empid IN (?)
+        AND ar.total_work_hours IS NOT NULL`,
+      [dateFromStr, teamMemberEmpids]
     );
 
-    const avgWorkHours =
-      workHoursStats[0]?.avg_work_minutes > 0
-        ? (workHoursStats[0].avg_work_minutes / 60).toFixed(2)
-        : 0;
+    const avgWorkHours = workHoursStats[0]?.avg_work_hours || 0;
 
     // Get leave utilization by employee
     const [leaveUtilization] = await pool.query(
       `SELECT 
-        e.id as employee_id,
-        e.employee_code,
+        e.empid,
         e.name as employee_name,
-        COUNT(al.id) as total_leaves,
-        SUM(CASE WHEN al.status = 'approved' THEN DATEDIFF(al.end_date, al.start_date) + 1 ELSE 0 END) as approved_days,
-        SUM(CASE WHEN al.status = 'pending' THEN DATEDIFF(al.end_date, al.start_date) + 1 ELSE 0 END) as pending_days
+        COUNT(l.id) as total_leaves,
+        SUM(CASE WHEN l.status = 'APPROVED' THEN l.total_days ELSE 0 END) as approved_days,
+        SUM(CASE WHEN l.status = 'PENDING' THEN l.total_days ELSE 0 END) as pending_days
       FROM employees e
-      LEFT JOIN attendance_leaves al ON e.id = al.employee_id 
-        AND al.organization_id = ?
-        AND al.start_date >= ?
-      WHERE e.manager_id = ? 
-        AND e.organization_id = ?
-      GROUP BY e.id, e.employee_code, e.name
+      LEFT JOIN leaves l ON e.empid = l.empid
+        AND l.start_date >= ?
+      WHERE e.manager_id = ?
+      GROUP BY e.empid, e.name
       ORDER BY e.name`,
-      [organization_id, dateFromStr, managerNumericId, organization_id]
+      [dateFromStr, managerIdParam]
     );
 
     res.json({
-      manager_id: managerNumericId,
+      manager_id: managerIdParam,
       manager_name: manager.name,
       period_days: days,
       date_from: dateFromStr,
@@ -721,7 +735,7 @@ router.get("/:id/analytics", async (req, res, next) => {
         attendance_trends: attendanceTrends,
         leave_utilization: leaveUtilization,
         attendance_by_status: attendanceByStatus,
-        average_work_hours: parseFloat(avgWorkHours),
+        average_work_hours: parseFloat(avgWorkHours) || 0,
         total_team_members: teamMembers.length,
       },
     });

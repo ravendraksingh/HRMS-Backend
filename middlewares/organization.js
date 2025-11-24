@@ -20,7 +20,7 @@ function extractOrganizationId(req, res, next) {
   }
 
   // Parse and validate organization_id
-  const organizationId = parseInt(req.user.organization_id, 10);
+  const organizationId = parseInt(req.user. 10);
   if (isNaN(organizationId) || organizationId <= 0) {
     return next(
       new ApiError(

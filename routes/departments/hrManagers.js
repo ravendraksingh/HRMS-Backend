@@ -3,35 +3,71 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../util/ApiError");
-const { resolveEmployeeNumericId, resolveDepartmentNumericId } = require("../../util/employeeUtil");
 
 /**
- * GET /departments/:identifier/hr-managers
+ * GET /departments/:deptid/hr-managers
  * Get all HR managers for a department
+ * Query params: is_active, effective_date (to filter by active status and date)
  */
-router.get("/:identifier/hr-managers", async (req, res, next) => {
-  const identifier = req.params.identifier;
-  const organization_id = req.organizationId;
+router.get("/:deptid/hr-managers", async (req, res, next) => {
+  const { deptid } = req.params;
+  const { is_active, effective_date } = req.query;
 
   try {
-    // Resolve department ID
-    const departmentId = await resolveDepartmentNumericId(identifier, organization_id);
+    // Validate department exists
+    const [[department]] = await pool.query(
+      "SELECT deptid FROM departments WHERE deptid = ?",
+      [deptid.toUpperCase()]
+    );
+
+    if (!department) {
+      throw new ApiError("Department not found", 404);
+    }
+
+    // Build query
+    let whereClauses = ["dhm.department_id = ?"];
+    let params = [deptid.toUpperCase()];
+
+    if (is_active !== undefined) {
+      const activeValue =
+        is_active === "true" || is_active === "1" || is_active === "Y"
+          ? "Y"
+          : "N";
+      whereClauses.push("dhm.is_active = ?");
+      params.push(activeValue);
+    }
+
+    if (effective_date) {
+      whereClauses.push(
+        "(dhm.effective_from <= ? AND (dhm.effective_to IS NULL OR dhm.effective_to >= ?))"
+      );
+      params.push(effective_date, effective_date);
+    }
 
     // Fetch HR managers for the department
     const [hrManagers] = await pool.query(
       `SELECT 
         dhm.id,
         dhm.department_id,
-        dhm.hr_manager_id,
+        dhm.hr_manager_empid,
+        dhm.effective_from,
+        dhm.effective_to,
+        dhm.is_active,
+        dhm.assigned_by,
+        dhm.remarks,
         dhm.created_at,
-        e.employee_code,
+        dhm.updated_at,
+        e.empid,
         e.name as hr_manager_name,
-        e.email as hr_manager_email
+        e.email as hr_manager_email,
+        assigner.name as assigned_by_name,
+        assigner.empid as assigned_by_empid
       FROM department_hr_managers dhm
-      INNER JOIN employees e ON dhm.hr_manager_id = e.id
-      WHERE dhm.department_id = ? AND dhm.organization_id = ?
-      ORDER BY e.name`,
-      [departmentId, organization_id]
+      INNER JOIN employees e ON dhm.hr_manager_empid = e.empid
+      LEFT JOIN employees assigner ON dhm.assigned_by = assigner.empid
+      WHERE ${whereClauses.join(" AND ")}
+      ORDER BY dhm.effective_from DESC, e.name`,
+      params
     );
 
     res.json({ hr_managers: hrManagers });
@@ -41,53 +77,110 @@ router.get("/:identifier/hr-managers", async (req, res, next) => {
 });
 
 /**
- * POST /departments/:identifier/hr-managers
+ * POST /departments/:deptid/hr-managers
  * Add an HR manager to a department
  */
-router.post("/:identifier/hr-managers", async (req, res, next) => {
-  const identifier = req.params.identifier;
-  const { hr_manager } = req.body; // Can be numeric ID or employee_code
-  const organization_id = req.organizationId;
+router.post("/:deptid/hr-managers", async (req, res, next) => {
+  const { deptid } = req.params;
+  const {
+    hr_manager_empid,
+    effective_from,
+    effective_to,
+    is_active = "Y",
+    assigned_by,
+    remarks,
+  } = req.body;
 
   try {
-    if (!hr_manager) {
-      throw new ApiError("hr_manager is required", 400);
+    if (!hr_manager_empid) {
+      throw new ApiError("hr_manager_empid is required", 400);
     }
 
-    // Resolve department ID
-    const departmentId = await resolveDepartmentNumericId(identifier, organization_id);
+    if (!effective_from) {
+      throw new ApiError("effective_from is required", 400);
+    }
 
-    // Resolve HR manager ID
-    const hrManagerId = await resolveEmployeeNumericId(hr_manager, organization_id);
+    // Validate is_active value
+    if (!["Y", "N"].includes(is_active.toUpperCase())) {
+      throw new ApiError("is_active must be 'Y' or 'N'", 400);
+    }
 
-    // Validate HR manager exists and belongs to organization
-    const [[hrMgr]] = await pool.query(
-      "SELECT id FROM employees WHERE id = ? AND organization_id = ?",
-      [hrManagerId, organization_id]
+    // Validate department exists
+    const [[department]] = await pool.query(
+      "SELECT deptid FROM departments WHERE deptid = ?",
+      [deptid.toUpperCase()]
     );
-    if (!hrMgr) {
-      throw new ApiError(
-        "HR Manager not found or doesn't belong to organization",
-        404
+
+    if (!department) {
+      throw new ApiError("Department not found", 404);
+    }
+
+    // Validate HR manager exists
+    const [[hrManager]] = await pool.query(
+      "SELECT empid FROM employees WHERE empid = ?",
+      [hr_manager_empid]
+    );
+
+    if (!hrManager) {
+      throw new ApiError("HR Manager not found", 404);
+    }
+
+    // Validate assigned_by if provided
+    if (assigned_by) {
+      const [[assigner]] = await pool.query(
+        "SELECT empid FROM employees WHERE empid = ?",
+        [assigned_by]
       );
+      if (!assigner) {
+        throw new ApiError("Assigned by employee not found", 404);
+      }
     }
 
-    // Check if HR manager is already assigned to this department
+    // Validate date range
+    if (effective_to && effective_to < effective_from) {
+      throw new ApiError("effective_to must be after effective_from", 400);
+    }
+
+    // Check if HR manager is already assigned to this department with overlapping dates
     const [[existing]] = await pool.query(
-      "SELECT id FROM department_hr_managers WHERE department_id = ? AND hr_manager_id = ? AND organization_id = ?",
-      [departmentId, hrManagerId, organization_id]
+      `SELECT id FROM department_hr_managers 
+       WHERE department_id = ? 
+       AND hr_manager_empid = ? 
+       AND is_active = 'Y'
+       AND (
+         (effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?))
+         OR (effective_to IS NULL AND effective_from <= ?)
+       )`,
+      [
+        deptid.toUpperCase(),
+        hr_manager_empid,
+        effective_from,
+        effective_from,
+        effective_from,
+      ]
     );
+
     if (existing) {
       throw new ApiError(
-        "HR Manager is already assigned to this department",
+        "HR Manager is already assigned to this department with overlapping effective dates",
         409
       );
     }
 
     // Insert HR manager assignment
     const [result] = await pool.query(
-      "INSERT INTO department_hr_managers (organization_id, department_id, hr_manager_id) VALUES (?, ?, ?)",
-      [organization_id, departmentId, hrManagerId]
+      `INSERT INTO department_hr_managers 
+       (department_id, hr_manager_empid, effective_from, effective_to, is_active, assigned_by, remarks) 
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        deptid.toUpperCase(),
+        hr_manager_empid,
+        effective_from,
+        effective_to || null,
+        is_active.toUpperCase(),
+        assigned_by || null,
+        remarks || null,
+      ]
     );
 
     // Fetch created assignment with employee details
@@ -95,54 +188,172 @@ router.post("/:identifier/hr-managers", async (req, res, next) => {
       `SELECT 
         dhm.id,
         dhm.department_id,
-        dhm.hr_manager_id,
+        dhm.hr_manager_empid,
+        dhm.effective_from,
+        dhm.effective_to,
+        dhm.is_active,
+        dhm.assigned_by,
+        dhm.remarks,
         dhm.created_at,
-        e.employee_code,
+        dhm.updated_at,
+        e.empid,
         e.name as hr_manager_name,
-        e.email as hr_manager_email
+        e.email as hr_manager_email,
+        assigner.name as assigned_by_name,
+        assigner.empid as assigned_by_empid
       FROM department_hr_managers dhm
-      INNER JOIN employees e ON dhm.hr_manager_id = e.id
+      INNER JOIN employees e ON dhm.hr_manager_empid = e.empid
+      LEFT JOIN employees assigner ON dhm.assigned_by = assigner.empid
       WHERE dhm.id = ?`,
       [result.insertId]
     );
 
-    res.status(201).json(assignment);
+    res.status(201).json({
+      message: "HR Manager assigned to department successfully",
+      assignment,
+    });
   } catch (error) {
     next(error);
   }
 });
 
 /**
- * DELETE /departments/:identifier/hr-managers/:hr_manager_id
- * Remove an HR manager from a department
+ * PATCH /departments/:deptid/hr-managers/:id
+ * Update an HR manager assignment
  */
-router.delete("/:identifier/hr-managers/:hr_manager_id", async (req, res, next) => {
-  const identifier = req.params.identifier;
-  const hrManagerIdParam = req.params.hr_manager_id;
-  const organization_id = req.organizationId;
+router.patch("/:deptid/hr-managers/:id", async (req, res, next) => {
+  const { deptid, id } = req.params;
+  const { effective_from, effective_to, is_active, remarks } = req.body;
 
   try {
-    // Resolve department ID
-    const departmentId = await resolveDepartmentNumericId(identifier, organization_id);
-
-    // Resolve HR manager ID
-    const hrManagerId = await resolveEmployeeNumericId(hrManagerIdParam, organization_id);
-
-    // Delete the assignment
-    const [result] = await pool.query(
-      "DELETE FROM department_hr_managers WHERE department_id = ? AND hr_manager_id = ? AND organization_id = ?",
-      [departmentId, hrManagerId, organization_id]
+    // Check if assignment exists
+    const [[existing]] = await pool.query(
+      "SELECT id FROM department_hr_managers WHERE id = ? AND department_id = ?",
+      [id, deptid.toUpperCase()]
     );
 
-    if (result.affectedRows === 0) {
+    if (!existing) {
       throw new ApiError("HR Manager assignment not found", 404);
     }
 
-    res.status(204).send();
+    // Build update query
+    const updates = [];
+    const params = [];
+
+    if (effective_from !== undefined) {
+      updates.push("effective_from = ?");
+      params.push(effective_from);
+    }
+
+    if (effective_to !== undefined) {
+      updates.push("effective_to = ?");
+      params.push(effective_to || null);
+    }
+
+    if (is_active !== undefined) {
+      if (!["Y", "N"].includes(is_active.toUpperCase())) {
+        throw new ApiError("is_active must be 'Y' or 'N'", 400);
+      }
+      updates.push("is_active = ?");
+      params.push(is_active.toUpperCase());
+    }
+
+    if (remarks !== undefined) {
+      updates.push("remarks = ?");
+      params.push(remarks || null);
+    }
+
+    if (updates.length === 0) {
+      throw new ApiError("No fields to update", 400);
+    }
+
+    // Validate date range if both dates are being updated
+    if (effective_from !== undefined && effective_to !== undefined) {
+      const finalFrom = effective_from;
+      const finalTo = effective_to || null;
+      if (finalTo && finalTo < finalFrom) {
+        throw new ApiError("effective_to must be after effective_from", 400);
+      }
+    }
+
+    params.push(id, deptid.toUpperCase());
+
+    const [result] = await pool.query(
+      `UPDATE department_hr_managers SET ${updates.join(
+        ", "
+      )} WHERE id = ? AND department_id = ?`,
+      params
+    );
+
+    if (result.affectedRows === 0) {
+      throw new ApiError("Failed to update assignment", 500);
+    }
+
+    // Fetch updated assignment
+    const [[assignment]] = await pool.query(
+      `SELECT 
+        dhm.id,
+        dhm.department_id,
+        dhm.hr_manager_empid,
+        dhm.effective_from,
+        dhm.effective_to,
+        dhm.is_active,
+        dhm.assigned_by,
+        dhm.remarks,
+        dhm.created_at,
+        dhm.updated_at,
+        e.empid,
+        e.name as hr_manager_name,
+        e.email as hr_manager_email
+      FROM department_hr_managers dhm
+      INNER JOIN employees e ON dhm.hr_manager_empid = e.empid
+      WHERE dhm.id = ?`,
+      [id]
+    );
+
+    res.json({
+      message: "HR Manager assignment updated successfully",
+      assignment,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /departments/:deptid/hr-managers/:id
+ * Remove an HR manager from a department (soft delete by setting is_active = 'N')
+ */
+router.delete("/:deptid/hr-managers/:id", async (req, res, next) => {
+  const { deptid, id } = req.params;
+
+  try {
+    // Check if assignment exists
+    const [[existing]] = await pool.query(
+      "SELECT id FROM department_hr_managers WHERE id = ? AND department_id = ?",
+      [id, deptid.toUpperCase()]
+    );
+
+    if (!existing) {
+      throw new ApiError("HR Manager assignment not found", 404);
+    }
+
+    // Soft delete by setting is_active = 'N' and effective_to = today
+    const [result] = await pool.query(
+      `UPDATE department_hr_managers 
+       SET is_active = 'N', effective_to = CURDATE() 
+       WHERE id = ? AND department_id = ?`,
+      [id, deptid.toUpperCase()]
+    );
+
+    if (result.affectedRows === 0) {
+      throw new ApiError("Failed to remove assignment", 500);
+    }
+
+    res.json({ message: "HR Manager assignment removed successfully" });
   } catch (error) {
     next(error);
   }
 });
 
 module.exports = router;
-
