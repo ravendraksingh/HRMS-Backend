@@ -26,6 +26,10 @@ class Leave {
 
     // Timestamp
     this.applied_at = data.applied_at || null;
+
+    // Internal fields (excluded from DTO)
+    this.created_at = data.created_at || null;
+    this.updated_at = data.updated_at || null;
   }
 
   /**
@@ -74,6 +78,8 @@ class Leave {
       cancelled_at: row.cancelled_at,
       remarks: row.remarks,
       applied_at: row.applied_at,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
     });
   }
 

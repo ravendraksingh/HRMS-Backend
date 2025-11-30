@@ -1,10 +1,16 @@
 const express = require("express");
 const router = express.Router({ mergeParams: true });
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
+const { createEducationSchema, updateEducationSchema } = require("../../validations/employeeSchemas");
+const { handleValidationErrors } = require("../../util/validation");
+const { param } = require("express-validator");
 
 // Get educational details for an employee
-router.get("/employees/:empid/education", async (req, res, next) => {
+router.get("/employees/:empid/education",
+  [param("empid").notEmpty().trim()],
+  handleValidationErrors,
+  async (req, res, next) => {
   try {
     const empid = req.params.empid;
 
@@ -35,20 +41,23 @@ router.get("/employees/:empid/education", async (req, res, next) => {
 });
 
 // Create educational detail record
-router.post("/employees/:empid/education", async (req, res, next) => {
-  const {
-    qualification_type,
-    degree,
-    specialization,
-    institution_name,
-    university_board,
-    start_date,
-    end_date,
-    percentage,
-    cgpa,
-    grade,
-  } = req.body;
-  const empid = req.params.empid;
+router.post("/employees/:empid/education",
+  createEducationSchema,
+  handleValidationErrors,
+  async (req, res, next) => {
+    const {
+      qualification_type,
+      degree,
+      specialization,
+      institution_name,
+      university_board,
+      start_date,
+      end_date,
+      percentage,
+      cgpa,
+      grade,
+    } = req.body;
+    const empid = req.params.empid;
 
   try {
     // Check if employee exists
@@ -58,10 +67,6 @@ router.post("/employees/:empid/education", async (req, res, next) => {
     );
     if (!employee) {
       throw new ApiError("Employee not found", 404);
-    }
-
-    if (!qualification_type || !institution_name) {
-      throw new ApiError("qualification_type and institution_name are required", 400);
     }
 
     const [result] = await pool.query(
@@ -90,23 +95,26 @@ router.post("/employees/:empid/education", async (req, res, next) => {
 });
 
 // Update educational detail record
-router.patch("/employees/:empid/education/:id", async (req, res, next) => {
-  const {
-    qualification_type,
-    degree,
-    specialization,
-    institution_name,
-    university_board,
-    start_date,
-    end_date,
-    percentage,
-    cgpa,
-    grade,
-    is_verified,
-    verified_by,
-  } = req.body;
-  const empid = req.params.empid;
-  const id = req.params.id;
+router.patch("/employees/:empid/education/:id",
+  updateEducationSchema,
+  handleValidationErrors,
+  async (req, res, next) => {
+    const {
+      qualification_type,
+      degree,
+      specialization,
+      institution_name,
+      university_board,
+      start_date,
+      end_date,
+      percentage,
+      cgpa,
+      grade,
+      is_verified,
+      verified_by,
+    } = req.body;
+    const empid = req.params.empid;
+    const id = req.params.id;
 
   try {
     // Check if employee exists
@@ -208,7 +216,13 @@ router.patch("/employees/:empid/education/:id", async (req, res, next) => {
 });
 
 // Delete educational detail record
-router.delete("/employees/:empid/education/:id", async (req, res, next) => {
+router.delete("/employees/:empid/education/:id",
+  [
+    param("empid").notEmpty().trim(),
+    param("id").isInt({ min: 1 }).withMessage("id must be a positive integer").toInt(),
+  ],
+  handleValidationErrors,
+  async (req, res, next) => {
   try {
     const empid = req.params.empid;
     const id = req.params.id;

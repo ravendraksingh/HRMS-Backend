@@ -1,15 +1,18 @@
 const express = require("express");
 const router = express.Router({ mergeParams: true });
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
+const { updatePersonalDetailsSchema } = require("../../validations/employeeSchemas");
+const { handleValidationErrors } = require("../../util/validation");
+const { param } = require("express-validator");
 
 // Get personal details for an employee
-router.get("/employees/:empid/personal", async (req, res, next) => {
+router.get("/employees/:empid/personal", 
+  [param("empid").notEmpty().trim()],
+  handleValidationErrors,
+  async (req, res, next) => {
   try {
     const empid = req.params.empid;
-    if (!empid) {
-      throw new ApiError("Employee ID is required", 400);
-    }
     // Check if employee exists
     const [[employee]] = await pool.query(
       "SELECT empid FROM employees WHERE empid = ?",
@@ -35,37 +38,40 @@ router.get("/employees/:empid/personal", async (req, res, next) => {
 });
 
 // Upsert personal details for an employee
-router.put("/employees/:empid/personal", async (req, res, next) => {
-  const empid = req.params.empid;
-  const {
-    phone,
-    alternate_phone,
-    date_of_birth,
-    gender,
-    marital_status,
-    blood_group,
-    emergency_contact_name,
-    emergency_contact_phone,
-    emergency_contact_relation,
-    permanent_address_line1,
-    permanent_address_line2,
-    permanent_city,
-    permanent_state,
-    permanent_postal_code,
-    permanent_country,
-    current_address_line1,
-    current_address_line2,
-    current_city,
-    current_state,
-    current_postal_code,
-    current_country,
-    pan_number,
-    aadhaar_number,
-    passport_number,
-    passport_expiry,
-    driving_license_number,
-    driving_license_expiry,
-  } = req.body;
+router.put("/employees/:empid/personal",
+  updatePersonalDetailsSchema,
+  handleValidationErrors,
+  async (req, res, next) => {
+    const empid = req.params.empid;
+    const {
+      phone,
+      alternate_phone,
+      date_of_birth,
+      gender,
+      marital_status,
+      blood_group,
+      emergency_contact_name,
+      emergency_contact_phone,
+      emergency_contact_relation,
+      permanent_address_line1,
+      permanent_address_line2,
+      permanent_city,
+      permanent_state,
+      permanent_postal_code,
+      permanent_country,
+      current_address_line1,
+      current_address_line2,
+      current_city,
+      current_state,
+      current_postal_code,
+      current_country,
+      pan_number,
+      aadhaar_number,
+      passport_number,
+      passport_expiry,
+      driving_license_number,
+      driving_license_expiry,
+    } = req.body;
 
   try {
     // Check if employee exists

@@ -1,12 +1,16 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
 const bcrypt = require("bcrypt");
+const {
+  usernameParamValidator,
+} = require("../../validations/commonValidators");
+const { handleValidationErrors } = require("../../util/validation");
 
 // Get all users (with optional filters)
 router.get("/", async (req, res, next) => {
-  const { is_active, empid } = req.query;
+  const { is_active } = req.query;
 
   try {
     let whereClauses = [];
@@ -15,10 +19,6 @@ router.get("/", async (req, res, next) => {
     if (is_active !== undefined) {
       whereClauses.push("u.is_active = ?");
       params.push(is_active === "true" ? "Y" : "N");
-    }
-    if (empid) {
-      whereClauses.push("u.empid = ?");
-      params.push(empid);
     }
 
     const whereSql = whereClauses.length
@@ -87,172 +87,56 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// Get user profile (complete profile with all related data)
-router.get("/:empid/profile", async (req, res, next) => {
-  const empid = req.params.empid;
-  if (!empid) {
-    throw new ApiError("Employee ID is required", 400);
-  }
-  try {
-    // Fetch user with all related data
-    const query = `
+// Get user by username
+router.get(
+  "/:username",
+  usernameParamValidator("username"),
+  handleValidationErrors,
+  async (req, res, next) => {
+    try {
+      // Get user details
+      const userQuery = `
       SELECT 
         u.empid,
         u.username,
         u.is_active,
-        u.last_login,
-        e.name as employee_name,
-        e.email as employee_email,
-        e.doj,
-        e.manager_id,
-        e.hr_manager_id,
-        e.department_id,
-        e.location_id,
-        d.name as department_name,
-        d.short_name as department_short_name,
-        loc.name as location_name,
-        loc.address_line1 as location_address_line1,
-        loc.address_line2 as location_address_line2,
-        loc.city as location_city,
-        loc.state as location_state,
-        loc.postal_code as location_postal_code,
-        loc.country as location_country,
-        loc.phone as location_phone,
-        m.empid as manager_empid,
-        m.name as manager_name,
-        m.email as manager_email
-      FROM users u
-      INNER JOIN employees e ON u.empid = e.empid
-      LEFT JOIN departments d ON e.department_id = d.deptid
-      LEFT JOIN office_locations loc ON e.location_id = loc.id
-      LEFT JOIN employees m ON e.manager_id = m.empid
-      WHERE u.empid = ?
-    `;
-
-    const [[profileData]] = await pool.query(query, [empid]);
-
-    if (!profileData) {
-      throw new ApiError("User profile not found", 404);
-    }
-
-    // Fetch user roles
-    const [roles] = await pool.query(
-      `SELECT r.roleid, r.name, r.description, r.permissions, r.is_active
-       FROM user_roles ur 
-       JOIN roles r ON ur.roleid = r.roleid 
-       WHERE ur.empid = ?`,
-      [empid]
-    );
-
-    // Build comprehensive profile response
-    const profile = {
-      user: {
-        empid: profileData.empid,
-        username: profileData.username,
-        employee_name: profileData.employee_name,
-        employee_email: profileData.employee_email,
-        doj: profileData.doj,
-        is_active: profileData.is_active,
-        roles: roles.map((r) => ({
-          roleid: r.roleid,
-          role_name: r.name,
-          description: r.description,
-          permissions: r.permissions,
-        })),
-        last_login: profileData.last_login,
-        department: profileData.department_name
-          ? {
-              deptid: profileData.department_id,
-              name: profileData.department_name,
-              short_name: profileData.department_short_name,
-            }
-          : null,
-        location: profileData.location_name
-          ? {
-              id: profileData.location_id,
-              name: profileData.location_name,
-              address_line1: profileData.location_address_line1,
-              address_line2: profileData.location_address_line2,
-              city: profileData.location_city,
-              state: profileData.location_state,
-              postal_code: profileData.location_postal_code,
-              country: profileData.location_country,
-              phone: profileData.location_phone,
-            }
-          : null,
-        manager: profileData.manager_name
-          ? {
-              empid: profileData.manager_empid,
-              name: profileData.manager_name,
-              email: profileData.manager_email,
-            }
-          : null,
-      },
-    };
-
-    res.json(profile);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Get user by empid
-router.get("/:empid", async (req, res, next) => {
-  try {
-    // Get user details
-    const userQuery = `
-      SELECT 
-        u.empid,
-        u.username,
-        u.is_active,
-        u.last_login,
-        u.created_at,
-        u.updated_at,
         e.name as employee_name,
         e.email as employee_email
       FROM users u
       LEFT JOIN employees e ON u.empid = e.empid
-      WHERE u.empid = ?
+      WHERE u.username = ?
     `;
 
-    const [[user]] = await pool.query(userQuery, [req.params.empid]);
-    if (!user) throw new ApiError("User not found", 404);
+      const [[user]] = await pool.query(userQuery, [req.params.username]);
+      console.log("user", user);
+      if (!user) throw new ApiError("User not found", 404);
 
-    // Fetch roles for the user
-    const rolesQuery = `
-      SELECT 
-        r.roleid,
-        r.name as role_name
-      FROM user_roles ur
-      JOIN roles r ON ur.roleid = r.roleid
-      WHERE ur.empid = ?
-      ORDER BY r.name
-    `;
+      // Fetch roles for the user
+      const rolesQuery = `SELECT roleid FROM user_roles WHERE empid = ?`;
+      const [roles] = await pool.query(rolesQuery, [user.empid]);
 
-    const [roles] = await pool.query(rolesQuery, [req.params.empid]);
+      const rolesArray = roles.map((r) => r.roleid);
 
-    // Format roles as array of objects
-    const userWithRoles = {
-      ...user,
-      roles: roles.map((r) => ({
-        roleid: r.roleid,
-        role_name: r.role_name,
-      })),
-    };
+      // Format roles as array of objects
+      const userWithRoles = {
+        ...user,
+        roles: rolesArray,
+      };
 
-    res.json(userWithRoles);
-  } catch (error) {
-    next(error);
+      res.json(userWithRoles);
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 // Create user
 router.post("/", async (req, res, next) => {
   const { empid, username, password, is_active = "N", roleids = [] } = req.body;
 
   try {
-    if (!empid || !username || !password) {
-      throw new ApiError("empid, username, and password are required", 400);
+    if (!empid || !username || !password || !is_active) {
+      throw new ApiError("empid, username, password, and is_active are required", 400);
     }
 
     // Check if employee exists

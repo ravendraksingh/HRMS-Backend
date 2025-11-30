@@ -289,11 +289,10 @@ collection.item.push(onboardingFolder);
 const weeklyOffFolder = {
   name: "Attendance - Weekly Off",
   item: [
-    createRequest("Get Weekly Off Configurations", "GET", "/attendance/weekly-off?year=2024&month=12"),
+    createRequest("Get Weekly Off Configurations", "GET", "/attendance/weekly-off?month=2024-12"),
     createRequest("Get Weekly Off by ID", "GET", "/attendance/weekly-off/{{weeklyOffId}}"),
     createRequest("Create Weekly Off", "POST", "/attendance/weekly-off", {
-      year: 2024,
-      month: 12,
+      month: "2024-12",
       days_of_week: [0, 6]
     }),
     createRequest("Update Weekly Off", "PATCH", "/attendance/weekly-off/{{weeklyOffId}}", {

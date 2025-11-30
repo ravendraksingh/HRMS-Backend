@@ -2,16 +2,15 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
+const Department = require("../../models/Department");
 
 // Get all departments
 router.get("/", async (req, res, next) => {
   try {
     const [rows] = await pool.query(
       `SELECT 
-        d.deptid, 
-        d.short_name,
-        d.name, 
+        d.*,
         e.name as department_head_name,
         e.empid as department_head_empid
       FROM departments d
@@ -19,7 +18,14 @@ router.get("/", async (req, res, next) => {
       ORDER BY d.name`
     );
 
-    res.json({ departments: rows });
+    const departments = Department.fromDatabaseRows(rows);
+    // Add department_head_name to response (not part of model)
+    const departmentsWithHead = departments.map((dept, index) => ({
+      ...dept.toJSON(),
+      department_head_name: rows[index]?.department_head_name || null,
+    }));
+
+    res.json({ departments: departmentsWithHead });
   } catch (error) {
     next(error);
   }
@@ -31,27 +37,26 @@ router.get("/:deptid", async (req, res, next) => {
     throw new ApiError("Department ID is required", 400);
   }
   try {
-    const [[department]] = await pool.query(
+    const [[departmentRow]] = await pool.query(
       `SELECT 
-          d.deptid, 
-          d.name,
-          d.short_name,
-          d.department_head_empid,
+          d.*,
           e.name as department_head_name,
-          e.empid as department_head_empid,
-          d.created_at, 
-          d.updated_at 
+          e.empid as department_head_empid
         FROM departments d
         LEFT JOIN employees e ON d.department_head_empid = e.empid
         WHERE d.deptid = ?`,
       [deptid]
     );
 
-    if (!department) {
+    if (!departmentRow) {
       throw new ApiError("Department not found", 404);
     }
 
-    res.json(department);
+    const department = Department.fromDatabaseRow(departmentRow);
+    res.json({
+      ...department.toJSON(),
+      department_head_name: departmentRow.department_head_name || null,
+    });
   } catch (error) {
     next(error);
   }
@@ -115,12 +120,9 @@ router.post("/", async (req, res, next) => {
     );
 
     // Fetch created department
-    const [[department]] = await pool.query(
+    const [[departmentRow]] = await pool.query(
       `SELECT 
-        d.deptid, 
-        d.name,
-        d.short_name,
-        d.department_head_empid,
+        d.*,
         e.name as department_head_name,
         e.empid as department_head_empid
       FROM departments d
@@ -129,9 +131,13 @@ router.post("/", async (req, res, next) => {
       [deptid.toUpperCase()]
     );
 
+    const department = Department.fromDatabaseRow(departmentRow);
     res.status(201).json({
       message: "Department created successfully",
-      department,
+      department: {
+        ...department.toJSON(),
+        department_head_name: departmentRow.department_head_name || null,
+      },
     });
   } catch (error) {
     next(error);
@@ -214,25 +220,24 @@ router.patch("/:deptid", async (req, res, next) => {
     );
 
     // Fetch updated department
-    const [[department]] = await pool.query(
+    const [[departmentRow]] = await pool.query(
       `SELECT 
-        d.deptid, 
-        d.name,
-        d.short_name,
-        d.department_head_empid,
+        d.*,
         e.name as department_head_name,
-        e.empid as department_head_empid,
-        d.created_at, 
-        d.updated_at 
+        e.empid as department_head_empid
       FROM departments d
       LEFT JOIN employees e ON d.department_head_empid = e.empid
       WHERE d.deptid = ?`,
       [deptid.toUpperCase()]
     );
 
+    const department = Department.fromDatabaseRow(departmentRow);
     res.json({
       message: "Department updated successfully",
-      department,
+      department: {
+        ...department.toJSON(),
+        department_head_name: departmentRow.department_head_name || null,
+      },
     });
   } catch (error) {
     next(error);

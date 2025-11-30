@@ -1,4 +1,4 @@
-const ApiError = require("../util/ApiError");
+const ApiError = require("../errors/ApiError");
 /**
  * 404 Not Found Handler
  * 

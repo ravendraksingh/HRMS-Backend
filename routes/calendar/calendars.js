@@ -4,57 +4,61 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
 const {
-  resolveEmployeeCalendar,
-  getMonthlyCalendar,
   getMonthlyCalendarForLevel,
   getCalendarForLevel,
-  isWorkingDay,
-  getWorkingDays,
+  getFinancialYear,
 } = require("../../util/calendarUtil");
-
-/**
- * GET /calendars/resolve/:empid
- * Resolve calendar for an employee (shows inheritance hierarchy)
- * Query params: year
- */
-router.get("/resolve/:empid", async (req, res, next) => {
-  const { empid } = req.params;
-  const { year } = req.query;
-
-  try {
-    if (!year) {
-      throw new ApiError("year query parameter is required", 400);
-    }
-
-    const calendar = await resolveEmployeeCalendar(empid, parseInt(year));
-
-    res.json({
-      message: "Calendar resolved successfully",
-      calendar,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
 
 /**
  * GET /calendars/monthly/organization
  * Get monthly calendar view for organization
- * Query params: year, month
+ * Query params: month (required, YYYY-MM format, e.g., 2024-12)
  */
 router.get("/monthly/organization", async (req, res, next) => {
-  const { year, month } = req.query;
+  const { month } = req.query;
 
   try {
-    if (!year || !month) {
-      throw new ApiError("year and month query parameters are required", 400);
+    if (!month) {
+      throw new ApiError(
+        "month query parameter is required (format: YYYY-MM)",
+        400
+      );
     }
+
+    // Validate month format (YYYY-MM)
+    const monthRegex = /^\d{4}-\d{2}$/;
+    if (!monthRegex.test(month)) {
+      throw new ApiError(
+        "month must be in format YYYY-MM (e.g., 2024-12)",
+        400
+      );
+    }
+
+    // Parse year and month from YYYY-MM format
+    const [yearStr, monthStr] = month.split("-");
+    const year = parseInt(yearStr);
+    const monthNum = parseInt(monthStr);
+
+    // Validate month range
+    if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+      throw new ApiError("month must be between 01 and 12", 400);
+    }
+
+    // Validate year range
+    if (isNaN(year) || year < 2000 || year > 2100) {
+      throw new ApiError("year must be between 2000 and 2100", 400);
+    }
+
+    // Convert year and month to financial year (YYYY-YY format)
+    // Use the first day of the month to determine financial year
+    const dateForFinancialYear = `${year}-${String(monthNum).padStart(2, "0")}-01`;
+    const financialYear = getFinancialYear(dateForFinancialYear);
 
     const calendar = await getCalendarForLevel(
       "ORGANIZATION",
-      parseInt(year),
+      financialYear,
       null,
       null,
       null
@@ -62,21 +66,22 @@ router.get("/monthly/organization", async (req, res, next) => {
 
     if (!calendar) {
       throw new ApiError(
-        `Organization calendar not found for year ${year}`,
+        `Organization calendar not found for financial year ${financialYear}`,
         404
       );
     }
 
     const monthlyCalendar = getMonthlyCalendarForLevel(
       calendar,
-      parseInt(year),
-      parseInt(month)
+      year,
+      monthNum
     );
 
     res.json({
       message: "Organization monthly calendar retrieved successfully",
-      year: parseInt(year),
-      month: parseInt(month),
+      month: month,
+      year: year,
+      month_number: monthNum,
       calendar_name: calendar.calendar_name,
       ...monthlyCalendar,
     });
@@ -86,51 +91,54 @@ router.get("/monthly/organization", async (req, res, next) => {
 });
 
 /**
- * GET /calendars/monthly/employee/:empid
- * Get monthly calendar view for an employee
- * Query params: year, month
- */
-router.get("/monthly/employee/:empid", async (req, res, next) => {
-  const { empid } = req.params;
-  const { year, month } = req.query;
-
-  try {
-    if (!year || !month) {
-      throw new ApiError("year and month query parameters are required", 400);
-    }
-
-    const calendar = await getMonthlyCalendar(
-      empid,
-      parseInt(year),
-      parseInt(month)
-    );
-
-    res.json({
-      message: "Monthly calendar retrieved successfully",
-      ...calendar,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
  * GET /calendars/monthly/location/:location_id
  * Get monthly calendar view for a location
- * Query params: year, month
+ * Query params: month (required, YYYY-MM format, e.g., 2024-12)
  */
 router.get("/monthly/location/:location_id", async (req, res, next) => {
   const { location_id } = req.params;
-  const { year, month } = req.query;
+  const { month } = req.query;
 
   try {
-    if (!year || !month) {
-      throw new ApiError("year and month query parameters are required", 400);
+    if (!month) {
+      throw new ApiError(
+        "month query parameter is required (format: YYYY-MM)",
+        400
+      );
     }
+
+    // Validate month format (YYYY-MM)
+    const monthRegex = /^\d{4}-\d{2}$/;
+    if (!monthRegex.test(month)) {
+      throw new ApiError(
+        "month must be in format YYYY-MM (e.g., 2024-12)",
+        400
+      );
+    }
+
+    // Parse year and month from YYYY-MM format
+    const [yearStr, monthStr] = month.split("-");
+    const year = parseInt(yearStr);
+    const monthNum = parseInt(monthStr);
+
+    // Validate month range
+    if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+      throw new ApiError("month must be between 01 and 12", 400);
+    }
+
+    // Validate year range
+    if (isNaN(year) || year < 2000 || year > 2100) {
+      throw new ApiError("year must be between 2000 and 2100", 400);
+    }
+
+    // Convert year and month to financial year (YYYY-YY format)
+    // Use the first day of the month to determine financial year
+    const dateForFinancialYear = `${year}-${String(monthNum).padStart(2, "0")}-01`;
+    const financialYear = getFinancialYear(dateForFinancialYear);
 
     const calendar = await getCalendarForLevel(
       "LOCATION",
-      parseInt(year),
+      financialYear,
       parseInt(location_id),
       null,
       null
@@ -138,22 +146,23 @@ router.get("/monthly/location/:location_id", async (req, res, next) => {
 
     if (!calendar) {
       throw new ApiError(
-        `Location calendar not found for location_id ${location_id} and year ${year}`,
+        `Location calendar not found for location_id ${location_id} and financial year ${financialYear}`,
         404
       );
     }
 
     const monthlyCalendar = getMonthlyCalendarForLevel(
       calendar,
-      parseInt(year),
-      parseInt(month)
+      year,
+      monthNum
     );
 
     res.json({
       message: "Location monthly calendar retrieved successfully",
       location_id: parseInt(location_id),
-      year: parseInt(year),
-      month: parseInt(month),
+      month: month,
+      year: year,
+      month_number: monthNum,
       calendar_name: calendar.calendar_name,
       ...monthlyCalendar,
     });
@@ -165,20 +174,52 @@ router.get("/monthly/location/:location_id", async (req, res, next) => {
 /**
  * GET /calendars/monthly/department/:department_id
  * Get monthly calendar view for a department
- * Query params: year, month
+ * Query params: month (required, YYYY-MM format, e.g., 2024-12)
  */
 router.get("/monthly/department/:department_id", async (req, res, next) => {
   const { department_id } = req.params;
-  const { year, month } = req.query;
+  const { month } = req.query;
 
   try {
-    if (!year || !month) {
-      throw new ApiError("year and month query parameters are required", 400);
+    if (!month) {
+      throw new ApiError(
+        "month query parameter is required (format: YYYY-MM)",
+        400
+      );
     }
+
+    // Validate month format (YYYY-MM)
+    const monthRegex = /^\d{4}-\d{2}$/;
+    if (!monthRegex.test(month)) {
+      throw new ApiError(
+        "month must be in format YYYY-MM (e.g., 2024-12)",
+        400
+      );
+    }
+
+    // Parse year and month from YYYY-MM format
+    const [yearStr, monthStr] = month.split("-");
+    const year = parseInt(yearStr);
+    const monthNum = parseInt(monthStr);
+
+    // Validate month range
+    if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+      throw new ApiError("month must be between 01 and 12", 400);
+    }
+
+    // Validate year range
+    if (isNaN(year) || year < 2000 || year > 2100) {
+      throw new ApiError("year must be between 2000 and 2100", 400);
+    }
+
+    // Convert year and month to financial year (YYYY-YY format)
+    // Use the first day of the month to determine financial year
+    const dateForFinancialYear = `${year}-${String(monthNum).padStart(2, "0")}-01`;
+    const financialYear = getFinancialYear(dateForFinancialYear);
 
     const calendar = await getCalendarForLevel(
       "DEPARTMENT",
-      parseInt(year),
+      financialYear,
       null,
       department_id,
       null
@@ -186,92 +227,25 @@ router.get("/monthly/department/:department_id", async (req, res, next) => {
 
     if (!calendar) {
       throw new ApiError(
-        `Department calendar not found for department_id ${department_id} and year ${year}`,
+        `Department calendar not found for department_id ${department_id} and financial year ${financialYear}`,
         404
       );
     }
 
     const monthlyCalendar = getMonthlyCalendarForLevel(
       calendar,
-      parseInt(year),
-      parseInt(month)
+      year,
+      monthNum
     );
 
     res.json({
       message: "Department monthly calendar retrieved successfully",
       department_id,
-      year: parseInt(year),
-      month: parseInt(month),
+      month: month,
+      year: year,
+      month_number: monthNum,
       calendar_name: calendar.calendar_name,
       ...monthlyCalendar,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * GET /calendars/working-day/:empid
- * Check if a specific date is a working day for an employee
- * Query params: date (YYYY-MM-DD)
- */
-router.get("/working-day/:empid", async (req, res, next) => {
-  const { empid } = req.params;
-  const { date } = req.query;
-
-  try {
-    if (!date) {
-      throw new ApiError("date query parameter is required (YYYY-MM-DD)", 400);
-    }
-
-    const status = await isWorkingDay(empid, date);
-
-    res.json({
-      empid,
-      date,
-      ...status,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * GET /calendars/working-days/:empid
- * Get working days for a date range
- * Query params: start_date, end_date (YYYY-MM-DD)
- */
-router.get("/working-days/:empid", async (req, res, next) => {
-  const { empid } = req.params;
-  const { start_date, end_date } = req.query;
-
-  try {
-    if (!start_date || !end_date) {
-      throw new ApiError(
-        "start_date and end_date query parameters are required (YYYY-MM-DD)",
-        400
-      );
-    }
-
-    const workingDays = await getWorkingDays(empid, start_date, end_date);
-
-    const summary = {
-      total_days: workingDays.length,
-      working_days: workingDays.filter((d) => d.is_working_day).length,
-      non_working_days: workingDays.filter((d) => !d.is_working_day).length,
-      holidays: workingDays.filter((d) => d.type === "HOLIDAY").length,
-      optional_holidays: workingDays.filter(
-        (d) => d.type === "OPTIONAL_HOLIDAY"
-      ).length,
-      weekly_offs: workingDays.filter((d) => d.type === "WEEKLY_OFF").length,
-    };
-
-    res.json({
-      empid,
-      start_date,
-      end_date,
-      calendar: workingDays,
-      summary,
     });
   } catch (error) {
     next(error);
@@ -282,14 +256,18 @@ router.get("/working-days/:empid", async (req, res, next) => {
  * GET /calendars
  * Get calendars by level
  * Query params: calendar_type (ORGANIZATION, LOCATION, DEPARTMENT, EMPLOYEE),
- *               year, location_id, department_id, empid
+ *               financial_year, location_id, department_id, empid
  */
 router.get("/", async (req, res, next) => {
-  const { calendar_type, year, location_id, department_id, empid } = req.query;
+  const { calendar_type, financial_year, location_id, department_id, empid } =
+    req.query;
 
   try {
-    if (!calendar_type) {
-      throw new ApiError("calendar_type query parameter is required", 400);
+    if (!calendar_type || !financial_year) {
+      throw new ApiError(
+        "calendar_type and financial_year query parameters are required",
+        400
+      );
     }
 
     if (
@@ -306,9 +284,9 @@ router.get("/", async (req, res, next) => {
     let whereClause = "calendar_type = ? AND is_active = 'Y'";
     const params = [calendar_type];
 
-    if (year) {
-      whereClause += " AND year = ?";
-      params.push(parseInt(year));
+    if (financial_year) {
+      whereClause += " AND financial_year = ?";
+      params.push(financial_year);
     }
 
     if (calendar_type === "ORGANIZATION") {
@@ -332,7 +310,7 @@ router.get("/", async (req, res, next) => {
         location_id,
         department_id,
         empid,
-        year,
+        financial_year,
         is_active,
         description,
         created_by,
@@ -340,7 +318,7 @@ router.get("/", async (req, res, next) => {
         updated_at
       FROM attendance_calendars
       WHERE ${whereClause}
-      ORDER BY year DESC, calendar_name ASC`,
+      ORDER BY financial_year DESC, calendar_name ASC`,
       params
     );
 
@@ -369,7 +347,7 @@ router.get("/:id", async (req, res, next) => {
         location_id,
         department_id,
         empid,
-        year,
+        financial_year,
         is_active,
         description,
         created_by

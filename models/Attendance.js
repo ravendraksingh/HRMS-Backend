@@ -26,6 +26,10 @@ class Attendance {
 
     // Additional fields
     this.remarks = data.remarks || null;
+
+    // Internal fields (excluded from DTO)
+    this.created_at = data.created_at || null;
+    this.updated_at = data.updated_at || null;
   }
 
   /**
@@ -74,6 +78,8 @@ class Attendance {
       late_minutes: row.late_minutes,
       early_leave_minutes: row.early_leave_minutes,
       remarks: row.remarks,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
     });
   }
 

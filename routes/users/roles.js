@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
 
 // Helper function to add status field to role object
 const addStatusField = (role) => {

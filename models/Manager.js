@@ -16,6 +16,10 @@ class Manager {
     this.hr_manager_id = data.hr_manager_id || null;
     this.department_id = data.department_id || null;
     this.location_id = data.location_id || null;
+
+    // Internal fields (excluded from DTO)
+    this.created_at = data.created_at || null;
+    this.updated_at = data.updated_at || null;
   }
 
   /**
@@ -50,6 +54,8 @@ class Manager {
       hr_manager_id: row.hr_manager_id,
       department_id: row.department_id,
       location_id: row.location_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
     });
   }
 

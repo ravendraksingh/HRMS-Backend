@@ -4,12 +4,14 @@ const router = express.Router();
 const pool = require("../../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
 const {
   generateAccessToken,
   generateRefreshToken,
   hashRefreshToken,
 } = require("../../util/authUtil");
+const { loginSchema } = require("../../validations/authSchemas");
+const { handleValidationErrors } = require("../../util/validation");
 
 // Get JWT_SECRET from environment variables (required)
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -20,120 +22,128 @@ if (!JWT_SECRET) {
   );
 }
 
-router.post("/login", async (req, res, next) => {
-  const { username, password } = req.body;
+router.post(
+  "/login",
+  //   loginSchema,
+  //   handleValidationErrors,
+  async (req, res, next) => {
+    const { username, password } = req.body;
 
-  async function verifyPassword(inputPassword, storedHash) {
-    const isMatch = await bcrypt.compare(inputPassword, storedHash);
-    return isMatch;
-  }
-
-  try {
-    const [[user]] = await pool.query(
-      "SELECT * FROM users WHERE username = ?",
-      [username]
-    );
-
-    if (!user) throw new ApiError("Username not found", 404);
-
-    const verified = await verifyPassword(password, user.password);
-    if (!verified) throw new ApiError("Invalid credentials", 400);
-
-    // Check if user is active
-    if (user.is_active !== "Y") {
-      throw new ApiError("User account is inactive", 403);
+    if (!username || !password) {
+      throw new ApiError("username and password are required", 400);
     }
 
-    // Update last_login timestamp for this user
-    const updateQuery =
-      "UPDATE users SET last_login = NOW() WHERE username = ?";
-    await pool.query(updateQuery, [username]);
-
-    // Fetch employee details
-    const [[emp]] = await pool.query(
-      "SELECT * FROM employees WHERE empid = ?",
-      [user.empid]
-    );
-
-    if (!emp) {
-      throw new ApiError("Employee not found for this user", 404);
+    async function verifyPassword(inputPassword, storedHash) {
+      const isMatch = await bcrypt.compare(inputPassword, storedHash);
+      return isMatch;
     }
 
-    // Fetch user roles
-    const [roles] = await pool.query(
-      `SELECT r.roleid FROM user_roles ur 
+    try {
+      const [[user]] = await pool.query(
+        "SELECT * FROM users WHERE username = ?",
+        [username]
+      );
+
+      if (!user) throw new ApiError("Username not found", 404);
+
+      const verified = await verifyPassword(password, user.password);
+      if (!verified) throw new ApiError("Invalid credentials", 400);
+
+      // Check if user is active
+      if (user.is_active !== "Y") {
+        throw new ApiError("User account is inactive", 403);
+      }
+
+      // Update last_login timestamp for this user
+      const updateQuery =
+        "UPDATE users SET last_login = NOW() WHERE username = ?";
+      await pool.query(updateQuery, [username]);
+
+      // Fetch employee details
+      const [[emp]] = await pool.query(
+        "SELECT * FROM employees WHERE empid = ?",
+        [user.empid]
+      );
+
+      if (!emp) {
+        throw new ApiError("Employee not found for this user", 404);
+      }
+
+      // Fetch user roles
+      const [roles] = await pool.query(
+        `SELECT r.roleid FROM user_roles ur 
        JOIN roles r ON ur.roleid = r.roleid 
        WHERE ur.empid = ?`,
-      [user.empid]
-    );
+        [user.empid]
+      );
 
-    let userRoles = [];
-    if (roles && roles.length > 0) {
-      userRoles = roles.map((r) => r.roleid);
-    }
-    
-    // Build comprehensive userDetails object with snake_case
-    const userDetails = {
-      username: user.username,
-      name: emp.name,
-      empid: user.empid,
-      last_login: user.last_login,
-      roles: userRoles || [],   
-    };
+      let userRoles = [];
+      if (roles && roles.length > 0) {
+        userRoles = roles.map((r) => r.roleid);
+      }
 
-    // Build JWT payload with essential info (using snake_case for consistency)
-    const jwtPayload = {
-      username: user.username,
-      empid: user.empid,
-      roles: userRoles || [],
-    };
+      // Build comprehensive userDetails object with snake_case
+      const userDetails = {
+        username: user.username,
+        name: emp.name,
+        empid: user.empid,
+        roles: userRoles || [],
+      };
 
-    // Generate Tokens
-    const accessToken = generateAccessToken(jwtPayload);
-    const refreshToken = generateRefreshToken();
-    const hashedRefreshToken = hashRefreshToken(refreshToken);
+      // Build JWT payload with essential info (using snake_case for consistency)
+      const jwtPayload = {
+        username: user.username,
+        empid: user.empid,
+        roles: userRoles || [],
+      };
 
-    // Calculate expiry (7 days from now)
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+      // Generate Tokens
+      const accessToken = generateAccessToken(jwtPayload);
+      const refreshToken = generateRefreshToken();
+      const hashedRefreshToken = hashRefreshToken(refreshToken);
 
-    // Store refresh token in database
-    await pool.query(
-      `INSERT INTO refresh_tokens 
+      // Calculate expiry (7 days from now)
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+
+      // Store refresh token in database
+      await pool.query(
+        `INSERT INTO refresh_tokens 
        (empid, token, expires_at) 
        VALUES (?, ?, ?)`,
-      [user.empid, hashedRefreshToken, expiresAt]
-    );
+        [user.empid, hashedRefreshToken, expiresAt]
+      );
 
-    // Set tokens in HTTP-only cookies (secure for production)
-    const isProduction = process.env.NODE_ENV === "production";
-    const cookieOptions = {
-      httpOnly: true,
-      secure: isProduction, // Only send over HTTPS in production
-      sameSite: isProduction ? "strict" : "lax", // CSRF protection
-      maxAge: 15 * 60 * 1000, // 15 minutes for access token
-    };
-    const refreshCookieOptions = {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "strict" : "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days for refresh token
-    };
+      // Set tokens in HTTP-only cookies (secure for production)
+      // const isProduction = process.env.NODE_ENV === "production";
+      // const cookieOptions = {
+      //   httpOnly: true,
+      //   secure: isProduction, // Only send over HTTPS in production
+      //   sameSite: isProduction ? "strict" : "lax", // CSRF protection
+      //   maxAge: 15 * 60 * 1000, // 15 minutes for access token
+      // };
+      // const refreshCookieOptions = {
+      //   httpOnly: true,
+      //   secure: isProduction,
+      //   sameSite: isProduction ? "strict" : "lax",
+      //   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days for refresh token
+      // };
 
-    res.cookie("accessToken", accessToken, cookieOptions);
-    res.cookie("refreshToken", refreshToken, refreshCookieOptions);
+      // res.cookie("accessToken", accessToken, cookieOptions);
+      // res.cookie("refreshToken", refreshToken, refreshCookieOptions);
 
-    res.json({
-      access_token: accessToken,
-      refresh_token: refreshToken, // Send plain token to client (for non-cookie clients)
-      token_type: "Bearer",
-      expires_in: 900, // 15 minutes in seconds
-      user: userDetails,
-    });
-  } catch (error) {
-    next(error);
+      res.json({
+        access_token: accessToken,
+        refresh_token: refreshToken, // Send plain token to client (for non-cookie clients)
+        token_type: "Bearer",
+        expires_in: 900, // 15 minutes in seconds
+        user: userDetails,
+      });
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 router.post("/register", async (req, res, next) => {
   const { empid, username, password, is_active } = req.body;

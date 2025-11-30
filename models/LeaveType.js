@@ -20,6 +20,10 @@ class LeaveType {
 
     // Status
     this.is_active = data.is_active || "Y";
+
+    // Internal fields (excluded from DTO)
+    this.created_at = data.created_at || null;
+    this.updated_at = data.updated_at || null;
   }
 
   /**
@@ -56,6 +60,8 @@ class LeaveType {
       requires_approval: row.requires_approval,
       requires_medical_certificate: row.requires_medical_certificate,
       is_active: row.is_active,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
     });
   }
 

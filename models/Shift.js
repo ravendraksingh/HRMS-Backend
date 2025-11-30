@@ -10,8 +10,13 @@ class Shift {
     this.start_time = data.start_time || null;
     this.end_time = data.end_time || null;
     this.break_duration_minutes = data.break_duration_minutes || 0;
+    this.grace_duration_minutes = data.grace_duration_minutes || 0;
     this.total_hours = data.total_hours || null;
     this.is_active = data.is_active || "Y";
+
+    // Internal fields (excluded from DTO)
+    this.created_at = data.created_at || null;
+    this.updated_at = data.updated_at || null;
   }
 
   /**
@@ -25,6 +30,7 @@ class Shift {
       start_time: this.start_time,
       end_time: this.end_time,
       break_duration_minutes: this.break_duration_minutes,
+      grace_duration_minutes: this.grace_duration_minutes,
       total_hours: this.total_hours,
       is_active: this.is_active,
     };
@@ -42,8 +48,11 @@ class Shift {
       start_time: row.start_time,
       end_time: row.end_time,
       break_duration_minutes: row.break_duration_minutes,
+      grace_duration_minutes: row.grace_duration_minutes,
       total_hours: row.total_hours,
       is_active: row.is_active,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
     });
   }
 

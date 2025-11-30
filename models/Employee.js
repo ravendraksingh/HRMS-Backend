@@ -15,6 +15,10 @@ class Employee {
     this.hr_manager_id = data.hr_manager_id || null;
     this.department_id = data.department_id || null;
     this.location_id = data.location_id || null;
+
+    // Internal fields (excluded from DTO)
+    this.created_at = data.created_at || null;
+    this.updated_at = data.updated_at || null;
   }
 
   /**

@@ -5,7 +5,7 @@
  */
 
 const pool = require("../db");
-const ApiError = require("./ApiError");
+const ApiError = require("../errors/ApiError");
 
 /**
  * Get employee's location and department for calendar resolution
@@ -41,7 +41,7 @@ async function getEmployeeContext(empid) {
 /**
  * Get calendar for a specific level
  * @param {string} calendarType - ORGANIZATION, LOCATION, DEPARTMENT, EMPLOYEE
- * @param {number} year - Year
+ * @param {String} financialYear - Financial Year
  * @param {number|null} locationId - Location ID
  * @param {string|null} departmentId - Department ID
  * @param {string|null} empid - Employee ID
@@ -49,14 +49,15 @@ async function getEmployeeContext(empid) {
  */
 async function getCalendarForLevel(
   calendarType,
-  year,
+  financialYear,
   locationId = null,
   departmentId = null,
   empid = null
 ) {
   try {
-    let whereClause = "calendar_type = ? AND year = ? AND is_active = 'Y'";
-    const params = [calendarType, year];
+    let whereClause =
+      "calendar_type = ? AND financial_year = ? AND is_active = 'Y'";
+    const params = [calendarType, financialYear];
 
     if (calendarType === "ORGANIZATION") {
       // No additional filter needed for organization (single org system)
@@ -81,7 +82,7 @@ async function getCalendarForLevel(
         location_id,
         department_id,
         empid,
-        year,
+        financial_year,
         description
       FROM attendance_calendars
       WHERE ${whereClause}
@@ -158,7 +159,7 @@ async function getCalendarForLevel(
  * @param {number} year - Year
  * @returns {Promise<Object>} Resolved calendar with all holidays and weekly offs
  */
-async function resolveEmployeeCalendar(empid, year) {
+async function resolveEmployeeCalendar(empid, financialYear) {
   try {
     // Get employee context
     const context = await getEmployeeContext(empid);
@@ -178,7 +179,7 @@ async function resolveEmployeeCalendar(empid, year) {
     if (empid) {
       calendars.employee = await getCalendarForLevel(
         "EMPLOYEE",
-        year,
+        financialYear,
         null,
         null,
         empid
@@ -189,7 +190,7 @@ async function resolveEmployeeCalendar(empid, year) {
     if (context.department_id) {
       calendars.department = await getCalendarForLevel(
         "DEPARTMENT",
-        year,
+        financialYear,
         null,
         context.department_id,
         null
@@ -200,7 +201,7 @@ async function resolveEmployeeCalendar(empid, year) {
     if (context.location_id) {
       calendars.location = await getCalendarForLevel(
         "LOCATION",
-        year,
+        financialYear,
         context.location_id,
         null,
         null
@@ -210,7 +211,7 @@ async function resolveEmployeeCalendar(empid, year) {
     // 4. Organization calendar (base/default)
     calendars.organization = await getCalendarForLevel(
       "ORGANIZATION",
-      year,
+      financialYear,
       null,
       null,
       null
@@ -277,7 +278,7 @@ async function resolveEmployeeCalendar(empid, year) {
     // Check if any calendars were found
     if (resolved.source_calendars.length === 0) {
       throw new ApiError(
-        `No calendars found for employee ${empid} for year ${year} at any level (organization, location, department, or employee)`,
+        `No calendars found for employee ${empid} for financialYear ${financialYear} at any level (organization, location, department, or employee)`,
         404
       );
     }
@@ -285,7 +286,7 @@ async function resolveEmployeeCalendar(empid, year) {
     // Convert Maps and Sets to arrays
     return {
       empid,
-      year,
+      financialYear,
       holidays: Array.from(resolved.holidays.values()),
       weekly_offs: Array.from(resolved.weekly_offs).sort(),
       date_overrides: Array.from(resolved.date_overrides.values()),
@@ -306,7 +307,8 @@ async function resolveEmployeeCalendar(empid, year) {
 async function isWorkingDay(empid, date) {
   try {
     // Handle date string or Date object
-    let dateStr, year, dayOfWeek;
+    let dateStr, year, dayOfWeek, financialYear;
+    financialYear = getFinancialYear(date);
 
     if (typeof date === "string") {
       // If already in YYYY-MM-DD format, use it directly
@@ -324,7 +326,7 @@ async function isWorkingDay(empid, date) {
     }
 
     // Resolve employee calendar
-    const calendar = await resolveEmployeeCalendar(empid, year);
+    const calendar = await resolveEmployeeCalendar(empid, financialYear);
 
     // Check date overrides first (highest priority)
     const dateOverride = calendar.date_overrides.find(
@@ -368,7 +370,7 @@ async function isWorkingDay(empid, date) {
     console.error("Error checking working day:", error);
     // Default to working day on error
     return {
-      is_working_day: true,
+      is_working_day: false,
       reason: "Error determining status",
       type: "UNKNOWN",
     };
@@ -574,7 +576,9 @@ async function getMonthlyCalendar(empid, year, month) {
       lastDay
     ).padStart(2, "0")}`;
 
-    const calendar = await resolveEmployeeCalendar(empid, year);
+    // Convert year and month to financial year (YYYY-YY format)
+    const financialYear = getFinancialYear(startDateStr);
+    const calendar = await resolveEmployeeCalendar(empid, financialYear);
     const workingDays = await getWorkingDays(empid, startDateStr, endDateStr);
 
     // Calculate summary
@@ -605,6 +609,47 @@ async function getMonthlyCalendar(empid, year, month) {
 }
 
 /**
+ * Get financial year in YYYY-YY format for a given date
+ * Financial year runs from April to March (e.g., April 2025 to March 2026 = 2025-26)
+ * @param {string|Date} date - Date in YYYY-MM-DD format or Date object
+ * @returns {string} Financial year in YYYY-YY format (e.g., "2025-26")
+ */
+function getFinancialYear(date) {
+  try {
+    let year, month;
+
+    if (typeof date === "string") {
+      // Parse YYYY-MM-DD format
+      const dateObj = new Date(date + "T00:00:00");
+      year = dateObj.getFullYear();
+      month = dateObj.getMonth() + 1; // getMonth() returns 0-11
+    } else {
+      // Date object
+      year = date.getFullYear();
+      month = date.getMonth() + 1; // getMonth() returns 0-11
+    }
+
+    // Financial year runs from April (4) to March (3)
+    // If month >= 4, financial year starts in current year
+    // If month < 4, financial year started in previous year
+    let financialYearStart;
+    if (month >= 4) {
+      financialYearStart = year;
+    } else {
+      financialYearStart = year - 1;
+    }
+
+    const financialYearEnd = financialYearStart + 1;
+    const endYearShort = String(financialYearEnd).slice(-2);
+
+    return `${financialYearStart}-${endYearShort}`;
+  } catch (error) {
+    console.error("Error getting financial year:", error);
+    throw new Error("Invalid date format. Expected YYYY-MM-DD or Date object.");
+  }
+}
+
+/**
  * Helper function to get day name
  * @param {number} dayOfWeek - Day of week (1=Monday, 7=Sunday)
  * @returns {string} Day name
@@ -631,5 +676,6 @@ module.exports = {
   getWorkingDays,
   getMonthlyCalendar,
   getMonthlyCalendarForLevel,
+  getFinancialYear,
   getDayName,
 };

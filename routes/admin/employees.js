@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
 
 // Get all employees (simple list)
 router.get("/all-employees", async (req, res, next) => {

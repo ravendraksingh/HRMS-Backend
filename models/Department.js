@@ -9,6 +9,10 @@ class Department {
     this.name = data.name || null;
     this.short_name = data.short_name || null;
     this.department_head_id = data.department_head_id || null;
+
+    // Internal fields (excluded from DTO)
+    this.created_at = data.created_at || null;
+    this.updated_at = data.updated_at || null;
   }
 
   /**

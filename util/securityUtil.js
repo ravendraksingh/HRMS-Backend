@@ -1,4 +1,4 @@
-const ApiError = require("./ApiError");
+const ApiError = require("../errors/ApiError");
 
 /**
  * Validates that a database result exists

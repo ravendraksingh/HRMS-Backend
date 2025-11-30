@@ -1,14 +1,51 @@
 const express = require("express");
-const router = express.Router({ mergeParams: true });
+const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
 
-// List assignments for an employee
-router.get("/employees/:empid/shift-assignments", async (req, res, next) => {
+/**
+ * GET /attendance/shift-assignments
+ * Get all shift assignments (for managers/admin)
+ * Query params: empid (optional), shiftid (optional), is_active (optional)
+ */
+router.get("/", async (req, res, next) => {
+  const { empid, shiftid, is_active } = req.query;
   try {
+    const where = [];
+    const params = [];
+    
+    if (empid) {
+      where.push("asa.empid = ?");
+      params.push(empid);
+    }
+    if (shiftid) {
+      where.push("asa.shiftid = ?");
+      params.push(shiftid);
+    }
+    if (is_active) {
+      where.push("asa.is_active = ?");
+      params.push(is_active);
+    }
+    
+    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const [rows] = await pool.query(
-      "SELECT * FROM attendance_shift_assignments WHERE empid = ? ORDER BY effective_from DESC",
-      [req.params.empid]
+      `SELECT 
+        asa.id,
+        asa.empid,
+        asa.shiftid,
+        DATE_FORMAT(asa.effective_from, '%Y-%m-%d') as effective_from,
+        DATE_FORMAT(asa.effective_to, '%Y-%m-%d') as effective_to,
+        asa.is_active,
+        asa.assigned_by,
+        DATE_FORMAT(asa.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
+        s.name as shift_name,
+        s.start_time,
+        s.end_time
+      FROM attendance_shift_assignments asa
+      LEFT JOIN attendance_shifts s ON asa.shiftid = s.shiftid
+      ${whereSql} 
+      ORDER BY asa.effective_from DESC`,
+      params
     );
     res.json({ assignments: rows });
   } catch (err) {
@@ -16,9 +53,14 @@ router.get("/employees/:empid/shift-assignments", async (req, res, next) => {
   }
 });
 
-// Create assignment
-router.post("/employees/:empid/shift-assignments", async (req, res, next) => {
+/**
+ * POST /attendance/shift-assignments
+ * Create a new shift assignment (for managers/admin)
+ * Body: empid, shiftid, effective_from, effective_to (optional), is_active (optional), assigned_by (optional)
+ */
+router.post("/", async (req, res, next) => {
   const {
+    empid,
     shiftid,
     effective_from,
     effective_to = null,
@@ -26,13 +68,13 @@ router.post("/employees/:empid/shift-assignments", async (req, res, next) => {
     assigned_by = null,
   } = req.body;
   try {
-    if (!shiftid || !effective_from) {
-      throw new ApiError("shiftid and effective_from are required", 400);
+    if (!empid || !shiftid || !effective_from) {
+      throw new ApiError("empid, shiftid, and effective_from are required", 400);
     }
     const [result] = await pool.query(
       "INSERT INTO attendance_shift_assignments (empid, shiftid, effective_from, effective_to, is_active, assigned_by) VALUES (?, ?, ?, ?, ?, ?)",
       [
-        req.params.empid,
+        empid,
         shiftid,
         effective_from,
         effective_to,

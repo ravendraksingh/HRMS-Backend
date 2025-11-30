@@ -13,6 +13,10 @@ class Holiday {
     this.is_override = data.is_override || "N";
     this.description = data.description || null;
     this.calendar_id = data.calendar_id || null;
+
+    // Internal fields (excluded from DTO)
+    this.created_at = data.created_at || null;
+    this.updated_at = data.updated_at || null;
   }
 
   /**
@@ -39,12 +43,14 @@ class Holiday {
   static fromDatabaseRow(row) {
     return new Holiday({
       id: row.id,
-      name: row.name, // Already mapped from holiday_name in SQL query
+      name: row.name || row.holiday_name, // Support both name and holiday_name
       holiday_date: row.holiday_date,
       is_optional: row.is_optional,
       is_override: row.is_override,
       description: row.description,
       calendar_id: row.calendar_id,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
     });
   }
 

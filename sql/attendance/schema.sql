@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   empid VARCHAR(10) NOT NULL,
   attendance_date DATE NOT NULL,
-  shiftid VARCHAR(10) DEFAULT NULL COMMENT 'Shift assigned for this day',
+  shiftid VARCHAR(10) NOT NULL DEFAULT 'GENERAL' COMMENT 'Shift assigned for this day',
   check_in_time TIMESTAMP NULL DEFAULT NULL COMMENT 'Employee check-in timestamp',
   check_out_time TIMESTAMP NULL DEFAULT NULL COMMENT 'Employee check-out timestamp',
   break_start_time TIMESTAMP NULL DEFAULT NULL COMMENT 'Break start timestamp',

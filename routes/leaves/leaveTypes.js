@@ -3,17 +3,14 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
-const { requireHrManagerOrAdmin } = require("../../util/authUtil");
+const ApiError = require("../../errors/ApiError");
 const LeaveType = require("../../models/LeaveType");
-
-// Apply HR Manager or Admin requirement to all routes
-router.use(requireHrManagerOrAdmin);
 
 /**
  * POST /leave-types
  * Create a new leave type
  * Body: leavetype_id, name, description, max_leaves_per_year, carry_forward, etc.
+ * Requires: HR Manager or Admin role
  */
 router.post("/", async (req, res, next) => {
   const {
@@ -29,36 +26,6 @@ router.post("/", async (req, res, next) => {
   } = req.body;
 
   try {
-    // Validate required fields
-    if (!leavetype_id || !name) {
-      throw new ApiError("leavetype_id and name are required", 400);
-    }
-
-    // Validate leavetype_id length (VARCHAR(3))
-    if (leavetype_id.length > 3) {
-      throw new ApiError("leavetype_id must be 3 characters or less", 400);
-    }
-
-    // Validate carry_forward value
-    if (!["Y", "N"].includes(carry_forward.toUpperCase())) {
-      throw new ApiError("carry_forward must be 'Y' or 'N'", 400);
-    }
-
-    // Validate requires_approval value
-    if (!["Y", "N"].includes(requires_approval.toUpperCase())) {
-      throw new ApiError("requires_approval must be 'Y' or 'N'", 400);
-    }
-
-    // Validate requires_medical_certificate value
-    if (!["Y", "N"].includes(requires_medical_certificate.toUpperCase())) {
-      throw new ApiError("requires_medical_certificate must be 'Y' or 'N'", 400);
-    }
-
-    // Validate is_active value
-    if (!["Y", "N"].includes(is_active.toUpperCase())) {
-      throw new ApiError("is_active must be 'Y' or 'N'", 400);
-    }
-
     // Check if leavetype_id already exists
     const [[existing]] = await pool.query(
       "SELECT leavetype_id FROM leave_types WHERE leavetype_id = ?",
@@ -79,10 +46,7 @@ router.post("/", async (req, res, next) => {
     );
 
     if (existingName) {
-      throw new ApiError(
-        `Leave type with name '${name}' already exists`,
-        400
-      );
+      throw new ApiError(`Leave type with name '${name}' already exists`, 400);
     }
 
     // Insert leave type
@@ -93,15 +57,15 @@ router.post("/", async (req, res, next) => {
         requires_medical_certificate, is_active
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        leavetype_id.toUpperCase(),
+        leavetype_id,
         name,
         description || null,
         max_leaves_per_year || null,
-        carry_forward.toUpperCase(),
+        carry_forward,
         max_carry_forward || 0,
-        requires_approval.toUpperCase(),
-        requires_medical_certificate.toUpperCase(),
-        is_active.toUpperCase(),
+        requires_approval,
+        requires_medical_certificate,
+        is_active,
       ]
     );
 
@@ -118,7 +82,7 @@ router.post("/", async (req, res, next) => {
         requires_medical_certificate,
         is_active
       FROM leave_types WHERE leavetype_id = ?`,
-      [leavetype_id.toUpperCase()]
+      [leavetype_id]
     );
 
     // Convert database row to LeaveType class instance
@@ -146,12 +110,16 @@ router.get("/", async (req, res, next) => {
     let params = [];
 
     if (is_active !== undefined) {
-      const activeValue = is_active === "true" || is_active === "1" || is_active === "Y" ? "Y" : "N";
+      const activeValue =
+        is_active === "true" || is_active === "1" || is_active === "Y"
+          ? "Y"
+          : "N";
       whereClauses.push("lt.is_active = ?");
       params.push(activeValue);
     }
 
-    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const whereSql =
+      whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
     const [leaveTypesRows] = await pool.query(
       `SELECT 
@@ -217,12 +185,12 @@ router.get("/available", async (req, res, next) => {
  * GET /leave-types/:id
  * Get a specific leave type by leavetype_id
  */
-router.get("/:id", async (req, res, next) => {
-  const { id } = req.params;
-
-  try {
-    const [[leaveTypeRow]] = await pool.query(
-      `SELECT 
+router.get(
+  "/:id",
+  async (req, res, next) => {
+    try {
+      const [[leaveTypeRow]] = await pool.query(
+        `SELECT 
         leavetype_id,
         name,
         description,
@@ -233,27 +201,28 @@ router.get("/:id", async (req, res, next) => {
         requires_medical_certificate,
         is_active
       FROM leave_types WHERE leavetype_id = ?`,
-      [id.toUpperCase()]
-    );
+        [req.params.id]
+      );
 
-    if (!leaveTypeRow) {
-      throw new ApiError("Leave type not found", 404);
+      if (!leaveTypeRow) {
+        throw new ApiError("Leave type not found", 404);
+      }
+
+      // Convert database row to LeaveType class instance
+      const leaveType = LeaveType.fromDatabaseRow(leaveTypeRow);
+      res.json({ leave_type: leaveType.toJSON() });
+    } catch (error) {
+      next(error);
     }
-
-    // Convert database row to LeaveType class instance
-    const leaveType = LeaveType.fromDatabaseRow(leaveTypeRow);
-    res.json({ leave_type: leaveType.toJSON() });
-  } catch (error) {
-    next(error);
   }
-});
+);
 
 /**
  * PATCH /leave-types/:id
  * Update a leave type by leavetype_id
+ * Requires: HR Manager or Admin role
  */
 router.patch("/:id", async (req, res, next) => {
-  const { id } = req.params;
   const {
     name,
     description,
@@ -269,7 +238,7 @@ router.patch("/:id", async (req, res, next) => {
     // Check if leave type exists
     const [[existing]] = await pool.query(
       "SELECT leavetype_id FROM leave_types WHERE leavetype_id = ?",
-      [id.toUpperCase()]
+      [req.params.id]
     );
 
     if (!existing) {
@@ -284,7 +253,7 @@ router.patch("/:id", async (req, res, next) => {
       // Check if new name conflicts with existing name
       const [[nameConflict]] = await pool.query(
         "SELECT leavetype_id FROM leave_types WHERE name = ? AND leavetype_id != ?",
-        [name, id.toUpperCase()]
+        [name, req.params.id]
       );
 
       if (nameConflict) {
@@ -309,11 +278,8 @@ router.patch("/:id", async (req, res, next) => {
     }
 
     if (carry_forward !== undefined) {
-      if (!["Y", "N"].includes(carry_forward.toUpperCase())) {
-        throw new ApiError("carry_forward must be 'Y' or 'N'", 400);
-      }
       updates.push("carry_forward = ?");
-      params.push(carry_forward.toUpperCase());
+      params.push(carry_forward);
     }
 
     if (max_carry_forward !== undefined) {
@@ -322,34 +288,21 @@ router.patch("/:id", async (req, res, next) => {
     }
 
     if (requires_approval !== undefined) {
-      if (!["Y", "N"].includes(requires_approval.toUpperCase())) {
-        throw new ApiError("requires_approval must be 'Y' or 'N'", 400);
-      }
       updates.push("requires_approval = ?");
-      params.push(requires_approval.toUpperCase());
+      params.push(requires_approval);
     }
 
     if (requires_medical_certificate !== undefined) {
-      if (!["Y", "N"].includes(requires_medical_certificate.toUpperCase())) {
-        throw new ApiError("requires_medical_certificate must be 'Y' or 'N'", 400);
-      }
       updates.push("requires_medical_certificate = ?");
-      params.push(requires_medical_certificate.toUpperCase());
+      params.push(requires_medical_certificate);
     }
 
     if (is_active !== undefined) {
-      if (!["Y", "N"].includes(is_active.toUpperCase())) {
-        throw new ApiError("is_active must be 'Y' or 'N'", 400);
-      }
       updates.push("is_active = ?");
-      params.push(is_active.toUpperCase());
+      params.push(is_active);
     }
 
-    if (updates.length === 0) {
-      throw new ApiError("No fields to update", 400);
-    }
-
-    params.push(id.toUpperCase());
+    params.push(req.params.id);
 
     const [result] = await pool.query(
       `UPDATE leave_types 
@@ -375,7 +328,7 @@ router.patch("/:id", async (req, res, next) => {
         requires_medical_certificate,
         is_active
       FROM leave_types WHERE leavetype_id = ?`,
-      [id.toUpperCase()]
+      [req.params.id]
     );
 
     // Convert database row to LeaveType class instance
@@ -394,15 +347,14 @@ router.patch("/:id", async (req, res, next) => {
  * DELETE /leave-types/:id
  * Delete a leave type (soft delete by setting is_active = 'N')
  * Note: We don't hard delete to maintain referential integrity
+ * Requires: HR Manager or Admin role
  */
 router.delete("/:id", async (req, res, next) => {
-  const { id } = req.params;
-
   try {
     // Check if leave type exists
     const [[existing]] = await pool.query(
       "SELECT leavetype_id FROM leave_types WHERE leavetype_id = ?",
-      [id.toUpperCase()]
+      [req.params.id]
     );
 
     if (!existing) {
@@ -412,27 +364,27 @@ router.delete("/:id", async (req, res, next) => {
     // Check if leave type is being used
     const [[inUse]] = await pool.query(
       "SELECT COUNT(*) as count FROM leaves WHERE leavetype_id = ?",
-      [id.toUpperCase()]
+      [req.params.id]
     );
 
     if (inUse.count > 0) {
       // Soft delete instead
       await pool.query(
         "UPDATE leave_types SET is_active = 'N' WHERE leavetype_id = ?",
-        [id.toUpperCase()]
+        [req.params.id]
       );
 
       return res.json({
         message:
           "Leave type is in use and has been deactivated instead of deleted",
-        leavetype_id: id.toUpperCase(),
+        leavetype_id: req.params.id,
       });
     }
 
     // Hard delete if not in use
     const [result] = await pool.query(
       "DELETE FROM leave_types WHERE leavetype_id = ?",
-      [id.toUpperCase()]
+      [req.params.id]
     );
 
     if (result.affectedRows === 0) {
@@ -446,4 +398,3 @@ router.delete("/:id", async (req, res, next) => {
 });
 
 module.exports = router;
-

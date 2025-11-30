@@ -186,7 +186,7 @@ HRMS-Backend/
 - `GET /managers/:id` - Get manager details
 - `GET /managers/:id/employees` - Get manager's direct reports
 - `GET /managers/:id/dashboard` - Get team dashboard overview
-- `GET /managers/:id/attendance` - Get team attendance
+- `GET /managers/:managerEmpId/employees/attendance` - Get team attendance
 - `GET /managers/:id/leaves/pending` - Get pending leave requests
 - `GET /managers/:id/analytics` - Get team analytics
 

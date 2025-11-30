@@ -1,10 +1,16 @@
 const express = require("express");
 const router = express.Router({ mergeParams: true });
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
+const { createFamilySchema, updateFamilySchema } = require("../../validations/employeeSchemas");
+const { handleValidationErrors } = require("../../util/validation");
+const { param } = require("express-validator");
 
 // Get family and dependents for an employee
-router.get("/employees/:empid/family", async (req, res, next) => {
+router.get("/employees/:empid/family",
+  [param("empid").notEmpty().trim()],
+  handleValidationErrors,
+  async (req, res, next) => {
   try {
     const empid = req.params.empid;
 
@@ -28,33 +34,36 @@ router.get("/employees/:empid/family", async (req, res, next) => {
 });
 
 // Create family/dependent record
-router.post("/employees/:empid/family", async (req, res, next) => {
-  const {
-    relationship,
-    name,
-    date_of_birth,
-    gender,
-    is_dependent,
-    occupation,
-    employer_name,
-    phone,
-    email,
-    aadhaar_number,
-    pan_number,
-    passport_number,
-    passport_expiry,
-    is_covered_under_insurance,
-    insurance_policy_number,
-    address_line1,
-    address_line2,
-    city,
-    state,
-    postal_code,
-    country,
-    is_emergency_contact,
-    notes,
-  } = req.body;
-  const empid = req.params.empid;
+router.post("/employees/:empid/family",
+  createFamilySchema,
+  handleValidationErrors,
+  async (req, res, next) => {
+    const {
+      relationship,
+      name,
+      date_of_birth,
+      gender,
+      is_dependent,
+      occupation,
+      employer_name,
+      phone,
+      email,
+      aadhaar_number,
+      pan_number,
+      passport_number,
+      passport_expiry,
+      is_covered_under_insurance,
+      insurance_policy_number,
+      address_line1,
+      address_line2,
+      city,
+      state,
+      postal_code,
+      country,
+      is_emergency_contact,
+      notes,
+    } = req.body;
+    const empid = req.params.empid;
 
   try {
     // Check if employee exists
@@ -64,10 +73,6 @@ router.post("/employees/:empid/family", async (req, res, next) => {
     );
     if (!employee) {
       throw new ApiError("Employee not found", 404);
-    }
-
-    if (!relationship || !name) {
-      throw new ApiError("relationship and name are required", 400);
     }
 
     const [result] = await pool.query(
@@ -112,34 +117,37 @@ router.post("/employees/:empid/family", async (req, res, next) => {
 });
 
 // Update family/dependent record
-router.patch("/employees/:empid/family/:id", async (req, res, next) => {
-  const {
-    relationship,
-    name,
-    date_of_birth,
-    gender,
-    is_dependent,
-    occupation,
-    employer_name,
-    phone,
-    email,
-    aadhaar_number,
-    pan_number,
-    passport_number,
-    passport_expiry,
-    is_covered_under_insurance,
-    insurance_policy_number,
-    address_line1,
-    address_line2,
-    city,
-    state,
-    postal_code,
-    country,
-    is_emergency_contact,
-    notes,
-  } = req.body;
-  const empid = req.params.empid;
-  const id = req.params.id;
+router.patch("/employees/:empid/family/:id",
+  updateFamilySchema,
+  handleValidationErrors,
+  async (req, res, next) => {
+    const {
+      relationship,
+      name,
+      date_of_birth,
+      gender,
+      is_dependent,
+      occupation,
+      employer_name,
+      phone,
+      email,
+      aadhaar_number,
+      pan_number,
+      passport_number,
+      passport_expiry,
+      is_covered_under_insurance,
+      insurance_policy_number,
+      address_line1,
+      address_line2,
+      city,
+      state,
+      postal_code,
+      country,
+      is_emergency_contact,
+      notes,
+    } = req.body;
+    const empid = req.params.empid;
+    const id = req.params.id;
 
   try {
     // Check if employee exists
@@ -273,7 +281,13 @@ router.patch("/employees/:empid/family/:id", async (req, res, next) => {
 });
 
 // Delete family/dependent record
-router.delete("/employees/:empid/family/:id", async (req, res, next) => {
+router.delete("/employees/:empid/family/:id",
+  [
+    param("empid").notEmpty().trim(),
+    param("id").isInt({ min: 1 }).withMessage("id must be a positive integer").toInt(),
+  ],
+  handleValidationErrors,
+  async (req, res, next) => {
   try {
     const empid = req.params.empid;
     const id = req.params.id;

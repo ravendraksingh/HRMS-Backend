@@ -3,7 +3,7 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
 const Employee = require("../../models/Employee");
 
 /**

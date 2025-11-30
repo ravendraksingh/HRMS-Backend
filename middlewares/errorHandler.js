@@ -1,4 +1,4 @@
-const ApiError = require("../util/ApiError");
+const ApiError = require("../errors/ApiError");
 
 /**
  * Error handler middleware
@@ -13,11 +13,23 @@ function errorHandler(err, req, res, next) {
     user_id: req.user?.id || null,
   };
 
+  // Include validation details if present
+  if (err instanceof ApiError && err.details) {
+    logContext.details = err.details;
+  } else if (err.details) {
+    logContext.details = err.details;
+  }
+
+  // For validation errors, log details separately for better visibility
+  if (err instanceof ApiError && err.code === "VALIDATION_ERROR" && err.details) {
+    console.error("Validation failed");
+    console.error("Validation errors:", JSON.stringify(err.details, null, 2));
+  }
+
   if (err.stack) {
     console.error(err.message, {
       ...logContext,
       stack: err.stack,
-      error: err,
     });
   } else {
     console.error(err.message, logContext);
@@ -30,43 +42,47 @@ function errorHandler(err, req, res, next) {
 
   // Handle ApiError instances
   if (err instanceof ApiError) {
-    return res.status(err.status).json({
-      error: err.message,
-      status: err.status,
-      path: req.originalUrl,
-      method: req.method,
-    });
+    const errorResponse = err.toJSON();
+    // Add request context to error response
+    // errorResponse.error.path = req.originalUrl;
+    // errorResponse.error.method = req.method;
+    return res.status(err.status).json(errorResponse);
   }
 
-  // Handle JWT errors
+  // Handle JWT errors - convert to ApiError format
   if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
-    return res.status(401).json({
-      error: "Invalid or expired token",
-      status: 401,
-      path: req.originalUrl,
-      method: req.method,
-    });
+    const apiError = ApiError.unauthorized(
+      err.name === "TokenExpiredError" ? "Token expired" : "Invalid token",
+      { tokenError: err.name }
+    );
+    const errorResponse = apiError.toJSON();
+    errorResponse.error.path = req.originalUrl;
+    errorResponse.error.method = req.method;
+    return res.status(401).json(errorResponse);
   }
 
-  // Handle validation errors
+  // Handle validation errors - convert to ApiError format
   if (err.name === "ValidationError") {
-    return res.status(400).json({
-      error: err.message || "Validation error",
-      status: 400,
-      path: req.originalUrl,
-      method: req.method,
-    });
+    const apiError = ApiError.validationError(
+      err.message || "Validation error",
+      err.errors || null
+    );
+    const errorResponse = apiError.toJSON();
+    // errorResponse.error.path = req.originalUrl;
+    // errorResponse.error.method = req.method;
+    return res.status(400).json(errorResponse);
   }
 
-  // Default error response
+  // Default error response - wrap in ApiError format
   const status = err.status || err.statusCode || 500;
-  res.status(status).json({
-    error: err.message || "Internal server error",
-    status: status,
-    path: req.originalUrl,
-    method: req.method,
-    ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
-  });
+  const apiError = ApiError.internalServerError(
+    err.message || "Internal server error",
+    err
+  );
+  const errorResponse = apiError.toJSON();
+  errorResponse.error.path = req.originalUrl;
+  errorResponse.error.method = req.method;
+  res.status(status).json(errorResponse);
 }
 
 module.exports = { errorHandler };

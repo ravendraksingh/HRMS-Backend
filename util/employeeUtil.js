@@ -1,5 +1,5 @@
 const pool = require("../db");
-const ApiError = require("./ApiError");
+const ApiError = require("../errors/ApiError");
 
 /**
  * Validates that an HR manager is assigned to an employee's department

@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router({ mergeParams: true });
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
 
 // Get employment history for an employee
 router.get("/employees/:empid/employment-history", async (req, res, next) => {

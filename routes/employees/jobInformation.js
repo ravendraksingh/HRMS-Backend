@@ -3,14 +3,20 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
-const ApiError = require("../../util/ApiError");
+const ApiError = require("../../errors/ApiError");
+const { createUpdateJobInformationSchema, createJobHistorySchema } = require("../../validations/employeeSchemas");
+const { handleValidationErrors } = require("../../util/validation");
+const { param } = require("express-validator");
 
 /**
  * GET /employees/:empid/job-information
  * Get job information for an employee
  */
-router.get("/:empid/job-information", async (req, res, next) => {
-  const { empid } = req.params;
+router.get("/:empid/job-information",
+  [param("empid").notEmpty().trim()],
+  handleValidationErrors,
+  async (req, res, next) => {
+    const { empid } = req.params;
 
   try {
     // Check if employee exists
@@ -69,28 +75,28 @@ router.get("/:empid/job-information", async (req, res, next) => {
  * POST /employees/:empid/job-information
  * Create or update job information (HR Manager/Admin only)
  */
-router.post("/:empid/job-information", async (req, res, next) => {
-  const { empid } = req.params;
-  const {
-    job_title,
-    employment_type,
-    employment_status,
-    date_of_joining,
-    probation_start_date,
-    probation_end_date,
-    probation_status,
-    confirmation_date,
-    shiftid,
-    cost_center,
-    employee_category,
-    grade,
-    level,
-  } = req.body;
+router.post("/:empid/job-information",
+  createUpdateJobInformationSchema,
+  handleValidationErrors,
+  async (req, res, next) => {
+    const { empid } = req.params;
+    const {
+      job_title,
+      employment_type,
+      employment_status,
+      date_of_joining,
+      probation_start_date,
+      probation_end_date,
+      probation_status,
+      confirmation_date,
+      shiftid,
+      cost_center,
+      employee_category,
+      grade,
+      level,
+    } = req.body;
 
   try {
-    if (!job_title || !date_of_joining) {
-      throw new ApiError("job_title and date_of_joining are required", 400);
-    }
 
     // Check if employee exists
     const [[employee]] = await pool.query(
@@ -258,8 +264,11 @@ router.post("/:empid/job-information", async (req, res, next) => {
  * GET /employees/:empid/job-history
  * Get job history (promotions, transfers) for an employee
  */
-router.get("/:empid/job-history", async (req, res, next) => {
-  const { empid } = req.params;
+router.get("/:empid/job-history",
+  [param("empid").notEmpty().trim()],
+  handleValidationErrors,
+  async (req, res, next) => {
+    const { empid } = req.params;
 
   try {
     // Check if employee exists
@@ -313,29 +322,26 @@ router.get("/:empid/job-history", async (req, res, next) => {
  * POST /employees/:empid/job-history
  * Add job history entry (promotion, transfer, etc.) - HR Manager/Admin only
  */
-router.post("/:empid/job-history", async (req, res, next) => {
-  const { empid } = req.params;
-  const {
-    previous_job_title,
-    new_job_title,
-    previous_department_id,
-    new_department_id,
-    previous_manager_id,
-    new_manager_id,
-    change_type,
-    effective_date,
-    reason,
-    notes,
-  } = req.body;
-  const approved_by = req.user?.empid;
+router.post("/:empid/job-history",
+  createJobHistorySchema,
+  handleValidationErrors,
+  async (req, res, next) => {
+    const { empid } = req.params;
+    const {
+      previous_job_title,
+      new_job_title,
+      previous_department_id,
+      new_department_id,
+      previous_manager_id,
+      new_manager_id,
+      change_type,
+      effective_date,
+      reason,
+      notes,
+    } = req.body;
+    const approved_by = req.user?.empid;
 
   try {
-    if (!new_job_title || !change_type || !effective_date) {
-      throw new ApiError(
-        "new_job_title, change_type, and effective_date are required",
-        400
-      );
-    }
 
     // Check if employee exists
     const [[employee]] = await pool.query(
