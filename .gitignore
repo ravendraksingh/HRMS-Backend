@@ -1,12 +1,10 @@
 # Ravendra
 LICENSE.md
 /docs/LICENSE_GUIDE.md
-LICENSE_GUIDE.md
 scripts/generate-hashed-password.sh
 postman/
 sql/
 scripts/
-generate_postman.js
 generate_complete_postman.js
 
 # Dependencies
