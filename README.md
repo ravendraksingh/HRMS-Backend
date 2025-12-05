@@ -39,7 +39,10 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
 - **Comprehensive Attendance Calendar**: Combined view of calendar, attendance records, and leaves for each day
 - **Manager Dashboard**: Comprehensive team management APIs for managers
 - **Role-Based Access Control**: Flexible user roles and permissions
-- **Logging**: Logging is currently disabled (no-op logger)
+- **PII Encryption**: AES-256-GCM encryption for sensitive personal information (PAN, Aadhaar, Passport, etc.)
+- **Redis Caching**: High-performance caching layer for frequently accessed data
+- **Database Transactions**: ACID-compliant transactions for data consistency
+- **Structured Logging**: Pino-based logging with environment-specific formatting
 - **RESTful API**: Well-structured REST endpoints following industry best practices
 
 ## Tech Stack
@@ -47,14 +50,17 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
 - **Runtime**: Node.js
 - **Framework**: Express.js 5.x
 - **Database**: MySQL 8.0+
+- **Cache**: Redis 4.6.0+
 - **Authentication**: JWT (JSON Web Tokens)
-- **Logging**: Disabled (no-op logger)
 - **Password Hashing**: bcrypt
+- **PII Encryption**: AES-256-GCM
+- **Logging**: Pino (structured logging)
 
 ## Prerequisites
 
 - Node.js (v14 or higher)
 - MySQL 8.0+
+- Redis 4.6.0+ (optional but recommended for caching)
 - npm or yarn
 
 ## Installation
@@ -79,6 +85,7 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
    ```env
    # JWT Configuration (REQUIRED)
    JWT_SECRET=your_generated_secret_here_minimum_32_characters
+   TOKEN_SECRET=your_token_secret_here
 
    # Database Configuration
    DB_HOST=localhost
@@ -86,6 +93,12 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
    DB_USER=your_db_user
    DB_PASSWORD=your_db_password
    DB_NAME=hrms_backend
+
+   # Redis Configuration (Optional but recommended)
+   REDIS_URL=redis://localhost:6379
+
+   # Encryption Configuration (REQUIRED for PII encryption)
+   ENCRYPTION_KEY=your_64_character_hex_encryption_key_here
 
    # Server Configuration
    PORT=8080
@@ -96,9 +109,16 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
    ENABLE_FILE_LOGGING=true
    ```
 
-   Generate JWT_SECRET:
+   Generate secrets:
 
    ```bash
+   # Generate JWT_SECRET (32 bytes = 64 hex characters)
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   
+   # Generate TOKEN_SECRET (32 bytes = 64 hex characters)
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   
+   # Generate ENCRYPTION_KEY (32 bytes = 64 hex characters for AES-256)
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```
 
@@ -129,33 +149,48 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
 ```
 HRMS-Backend/
 ├── config/
-│   └── logger.js              # No-op logger (logging disabled)
+│   └── piiFields.js           # PII fields configuration for encryption
 ├── middlewares/
 │   ├── authenticateJWT.js     # JWT authentication middleware
+│   ├── cacheHeaders.js        # HTTP cache headers middleware
 │   ├── errorHandler.js        # Global error handler
 │   ├── notFoundHandler.js     # 404 handler
-│   ├── organization.js        # Organization context extraction
-│   └── requestLogger.js       # Request payload logger
+│   └── rbac.js                # Role-Based Access Control middleware
 ├── routes/
 │   ├── admin/                 # Admin routes
 │   ├── attendance/            # Attendance management routes
 │   ├── auth/                  # Authentication routes
-│   ├── calendar/              # Calendar management routes (holidays, calendars)
-│   ├── departments/          # Department management routes
+│   ├── calendar/              # Calendar management routes
+│   ├── departments/           # Department management routes
 │   ├── employees/             # Employee management routes
+│   ├── leaves/                # Leave management routes
 │   ├── managers/              # Manager dashboard routes
 │   ├── onboarding/            # Employee onboarding routes
 │   ├── organization/          # Organization routes
-│   ├── organizations/         # Organization management
 │   ├── status/                # Health check routes
 │   └── users/                  # User management routes
+├── queries/                   # Reusable SQL queries
+│   ├── employees.js
+│   ├── departments.js
+│   └── locations.js
 ├── sql/
-│   └── schema.sql             # Complete database schema
+│   ├── schema.sql             # Complete database schema
+│   └── migrations/            # Database migration scripts
 ├── util/
-│   ├── ApiError.js            # Custom error class
+│   ├── attendanceUtil.js      # Attendance calculation utilities
 │   ├── authUtil.js            # Authentication utilities
-│   ├── employeeUtil.js        # Employee utilities
-│   └── securityUtil.js        # Security utilities
+│   ├── cacheUtil.js           # Redis caching utilities
+│   ├── calendarUtil.js        # Calendar utilities
+│   ├── encryption.js          # PII encryption utilities
+│   ├── logger.js              # Pino logger configuration
+│   ├── prefillCache.js        # Cache pre-fill on startup
+│   └── redisClient.js        # Redis connection client
+├── validations/               # Request validation schemas
+│   ├── employeeSchemas.js
+│   ├── leaveSchemas.js
+│   └── ...
+├── errors/
+│   └── ApiError.js            # Custom error class
 ├── db.js                      # Database connection pool
 ├── server.js                  # Main server file
 ├── .env                       # Environment variables (not in git)
@@ -248,7 +283,9 @@ See `ENV_SETUP.md` for detailed environment variable documentation.
 
 ### Required Variables
 
-- `JWT_SECRET` - Secret key for JWT token signing (minimum 32 characters)
+- `JWT_SECRET` - Secret key for JWT token signing (minimum 32 characters / 64 hex characters)
+- `TOKEN_SECRET` - Secret key for token encryption (64 hex characters)
+- `ENCRYPTION_KEY` - PII encryption key (64 hex characters for AES-256)
 
 ### Optional Variables
 
@@ -257,6 +294,7 @@ See `ENV_SETUP.md` for detailed environment variable documentation.
 - `DB_USER` - Database username
 - `DB_PASSWORD` - Database password
 - `DB_NAME` - Database name
+- `REDIS_URL` - Redis connection URL (default: redis://localhost:6379)
 - `PORT` - Server port (default: 8080)
 - `NODE_ENV` - Environment mode (development, production)
 - `LOG_LEVEL` - Logging level (debug, info, warn, error)
@@ -264,12 +302,14 @@ See `ENV_SETUP.md` for detailed environment variable documentation.
 
 ## Logging
 
-Logging is currently disabled in the application. A no-op logger is used that silently ignores all logging calls. This removes logging dependencies and reduces overhead.
+The application uses **Pino** for structured logging:
 
-To re-enable logging in the future, you can:
-1. Install a logging library of your choice
-2. Replace the no-op logger in `config/logger.js` with your chosen logging implementation
-3. Uncomment logging middleware in `server.js` if needed
+- **Development**: Human-readable formatted logs with colors
+- **Production**: JSON-formatted logs for log aggregation systems
+- **Log Levels**: Configurable via `LOG_LEVEL` environment variable (debug, info, warn, error)
+- **Performance**: High-performance asynchronous logging
+
+Logging is configured in `util/logger.js` and can be customized per environment.
 
 ## Database Design
 
@@ -277,10 +317,27 @@ The system uses a single-tenant architecture with a clean, normalized database s
 
 ### Key Features
 
-- `employee_code` (VARCHAR(10)) as primary key in `employee_master` table
-- All module tables follow `<module>_master` naming convention
-- Foreign keys reference `employee_code` where applicable
-- Optimized indexes for query performance
+- **Normalized Schema**: Third Normal Form (3NF) compliance
+- **Referential Integrity**: Foreign key constraints throughout
+- **Transaction Support**: ACID-compliant transactions for critical operations
+- **Optimized Indexes**: Strategic indexing for query performance
+- **Connection Pooling**: Efficient MySQL connection management
+
+### Transaction Patterns
+
+Critical operations use database transactions to ensure data consistency:
+
+- **Leave Approval**: Updates `leaves` and `leave_balances` tables atomically
+- **Attendance Correction**: Creates/updates `attendance_records` and `attendance_correction_requests` atomically
+- **Onboarding**: Multiple table operations wrapped in transactions
+- **Calendar Operations**: Batch operations use transactions
+
+### Caching Strategy
+
+- **Redis Cache**: Frequently accessed data cached with TTL
+- **Cache Pre-fill**: Startup cache warming for common data
+- **Cache Invalidation**: Pattern-based invalidation on data updates
+- **Graceful Degradation**: Application works without Redis (with reduced performance)
 
 ## Testing
 
@@ -306,15 +363,22 @@ This uses `nodemon` for automatic server restart on file changes.
 - Follow Express.js best practices
 - Use async/await for asynchronous operations
 - Always include error handling
-- Use structured logging instead of console.log
+- Use structured logging (Pino) instead of console.log
+- Use database transactions for multi-table operations
+- Implement proper input validation on all routes
+- Follow RBAC patterns for authorization
 
 ## Security
 
-- JWT tokens for authentication
-- Password hashing with bcrypt (10 salt rounds)
-- Sensitive fields are redacted in logs
-- SQL injection prevention via parameterized queries
-- CORS configuration for frontend access
+- **JWT Authentication**: Secure token-based authentication with refresh tokens
+- **Password Security**: Bcrypt hashing with salt rounds
+- **PII Encryption**: AES-256-GCM encryption for sensitive personal data (PAN, Aadhaar, Passport, Driving License)
+- **Role-Based Access Control**: Hierarchical RBAC (ADMIN, HRMANAGER, MANAGER, USER)
+- **SQL Injection Prevention**: Parameterized queries throughout
+- **Input Validation**: Express-validator for request validation
+- **CORS Configuration**: Configurable CORS for frontend access
+- **Secure Headers**: HTTP security headers and cache control
+- **Environment Variables**: All secrets stored in environment variables (never in code)
 
 ## Contributing
 
@@ -325,23 +389,40 @@ This uses `nodemon` for automatic server restart on file changes.
 
 ## License
 
-Copyright (c) 2024 Niyava. All rights reserved.
+**Copyright (c) 2024 Niyava Technologies Pvt. Ltd. All rights reserved.**
 
-This software and associated documentation files (the "Software") are proprietary and confidential. Unauthorized copying, modification, distribution, or use of this Software, via any medium, is strictly prohibited without the express written permission of Niyava.
+This software and associated documentation files (the "Software") are proprietary and confidential property of Niyava Technologies Pvt. Ltd. This Software is licensed, not sold, under the terms and conditions set forth in the [Commercial License Agreement](LICENSE.md).
 
-### Proprietary License
+### Proprietary License Terms
 
 - This software is proprietary and not open source
 - Redistribution is not permitted
 - Modification is not permitted without authorization
-- Commercial use is restricted to authorized parties only
-- All rights are reserved by Niyava
+- Commercial use requires a valid license agreement
+- All rights are reserved by Niyava Technologies Pvt. Ltd.
 
-For licensing inquiries, please contact: ravendra@niyava.com
+### Licensing Options
 
-## Author
+Niyava Technologies Pvt. Ltd. offers various licensing models for commercial use:
 
-Ravendra Kumar Singh
+- **Per-Organization License**: Single organization deployment with unlimited users
+- **Per-User License**: Scalable pricing based on number of active users
+- **SaaS Subscription**: Cloud-hosted solution with managed infrastructure
+- **Enterprise License**: Custom terms with dedicated support and custom development
+
+For detailed licensing information, pricing, or to obtain a commercial license, please see:
+
+- [LICENSE.md](LICENSE.md) - Full commercial license agreement
+- [docs/LICENSING_GUIDE.md](docs/LICENSING_GUIDE.md) - Licensing guide and recommendations
+
+**For licensing inquiries, please contact:**  
+Email: ravendra@niyava.com  
+Website: https://niyava.com
+
+## Author & Company
+
+**Ravendra Kumar Singh**  
+**Niyava Technologies Pvt. Ltd.**
 
 ## Support
 
@@ -357,4 +438,6 @@ You can also open an issue in the repository for bug reports or feature requests
 
 For technical documentation, please refer to:
 
+- [docs/TECHNICAL_ARCHITECTURE.md](docs/TECHNICAL_ARCHITECTURE.md) - Complete technical architecture document
+- [docs/LICENSING_GUIDE.md](docs/LICENSING_GUIDE.md) - Licensing guide and commercial licensing information
 - `docs/CALENDAR_SYSTEM.md` - Calendar system documentation (hierarchical calendars, holidays, weekly offs)
