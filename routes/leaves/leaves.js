@@ -145,33 +145,49 @@ router.post("/:id/approve", async (req, res, next) => {
       throw new ApiError("Leave not found or already processed", 400);
     }
 
-    // Update leave status
-    const [result] = await pool.query(
-      "UPDATE leaves SET status = 'APPROVED', approved_by = ?, approved_at = NOW() WHERE id = ? AND status = 'PENDING'",
-      [approved_by, req.params.id]
-    );
+    // Start transaction for atomic operations
+    const connection = await pool.getConnection();
+    await connection.beginTransaction();
 
-    if (result.affectedRows === 0) {
-      throw new ApiError("Leave not found or already processed", 400);
+    try {
+      // Update leave status
+      const [result] = await connection.query(
+        "UPDATE leaves SET status = 'APPROVED', approved_by = ?, approved_at = NOW() WHERE id = ? AND status = 'PENDING'",
+        [approved_by, req.params.id]
+      );
+
+      if (result.affectedRows === 0) {
+        throw new ApiError("Leave not found or already processed", 400);
+      }
+
+      // Update leave_balances: increment used_leaves
+      const leaveYear = new Date(leave.start_date).getFullYear();
+      await connection.query(
+        `INSERT INTO leave_balances (empid, leavetype_id, year, used_leaves)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE 
+           used_leaves = used_leaves + ?`,
+        [
+          leave.empid,
+          leave.leavetype_id,
+          leaveYear,
+          leave.total_days,
+          leave.total_days,
+        ]
+      );
+
+      // Commit transaction if all operations succeed
+      await connection.commit();
+
+      res.json({ approved: true });
+    } catch (error) {
+      // Rollback transaction on any error
+      await connection.rollback();
+      throw error;
+    } finally {
+      // Always release connection
+      connection.release();
     }
-
-    // Update leave_balances: increment used_leaves
-    const leaveYear = new Date(leave.start_date).getFullYear();
-    await pool.query(
-      `INSERT INTO leave_balances (empid, leavetype_id, year, used_leaves)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE 
-         used_leaves = used_leaves + ?`,
-      [
-        leave.empid,
-        leave.leavetype_id,
-        leaveYear,
-        leave.total_days,
-        leave.total_days,
-      ]
-    );
-
-    res.json({ approved: true });
   } catch (err) {
     next(err);
   }
