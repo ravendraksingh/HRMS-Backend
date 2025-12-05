@@ -10,7 +10,8 @@ function errorHandler(err, req, res, next) {
     method: req.method,
     path: req.originalUrl,
     status: err.status || err.statusCode || 500,
-    user_id: req.user?.id || null,
+    username: req.user?.username || null,
+    empid: req.user?.empid || null,
   };
 
   // Include validation details if present
@@ -21,7 +22,11 @@ function errorHandler(err, req, res, next) {
   }
 
   // For validation errors, log details separately for better visibility
-  if (err instanceof ApiError && err.code === "VALIDATION_ERROR" && err.details) {
+  if (
+    err instanceof ApiError &&
+    err.code === "VALIDATION_ERROR" &&
+    err.details
+  ) {
     console.error("Validation failed");
     console.error("Validation errors:", JSON.stringify(err.details, null, 2));
   }
@@ -46,6 +51,7 @@ function errorHandler(err, req, res, next) {
     // Add request context to error response
     // errorResponse.error.path = req.originalUrl;
     // errorResponse.error.method = req.method;
+    console.log("errorResponse", errorResponse);
     return res.status(err.status).json(errorResponse);
   }
 
@@ -56,8 +62,8 @@ function errorHandler(err, req, res, next) {
       { tokenError: err.name }
     );
     const errorResponse = apiError.toJSON();
-    errorResponse.error.path = req.originalUrl;
-    errorResponse.error.method = req.method;
+    errorResponse.path = req.originalUrl;
+    errorResponse.method = req.method;
     return res.status(401).json(errorResponse);
   }
 
@@ -69,7 +75,7 @@ function errorHandler(err, req, res, next) {
     );
     const errorResponse = apiError.toJSON();
     // errorResponse.error.path = req.originalUrl;
-    // errorResponse.error.method = req.method;
+    // errorResponse.method = req.method;
     return res.status(400).json(errorResponse);
   }
 
@@ -80,8 +86,9 @@ function errorHandler(err, req, res, next) {
     err
   );
   const errorResponse = apiError.toJSON();
-  errorResponse.error.path = req.originalUrl;
-  errorResponse.error.method = req.method;
+  errorResponse.path = req.originalUrl;
+  errorResponse.method = req.method;
+  //   console.log("errorResponse", errorResponse);
   res.status(status).json(errorResponse);
 }
 

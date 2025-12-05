@@ -4,7 +4,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const LeaveType = require("../../models/LeaveType");
+const { requireHRManagerOrAdmin } = require("../../middlewares/rbac");
 
 /**
  * POST /leave-types
@@ -12,7 +12,7 @@ const LeaveType = require("../../models/LeaveType");
  * Body: leavetype_id, name, description, max_leaves_per_year, carry_forward, etc.
  * Requires: HR Manager or Admin role
  */
-router.post("/", async (req, res, next) => {
+router.post("/", requireHRManagerOrAdmin, async (req, res, next) => {
   const {
     leavetype_id,
     name,
@@ -85,12 +85,9 @@ router.post("/", async (req, res, next) => {
       [leavetype_id]
     );
 
-    // Convert database row to LeaveType class instance
-    const leaveType = LeaveType.fromDatabaseRow(leaveTypeRow);
-
     res.status(201).json({
       message: "Leave type created successfully",
-      leave_type: leaveType.toJSON(),
+      leave_type: leaveTypeRow,
     });
   } catch (error) {
     next(error);
@@ -136,12 +133,9 @@ router.get("/", async (req, res, next) => {
       params
     );
 
-    // Convert database rows to LeaveType class instances
-    const leaveTypes = LeaveType.fromDatabaseRows(leaveTypesRows);
-
     res.json({
-      count: leaveTypes.length,
-      leave_types: leaveTypes.map((lt) => lt.toJSON()),
+      count: leaveTypesRows.length,
+      leave_types: leaveTypesRows,
     });
   } catch (error) {
     next(error);
@@ -169,12 +163,9 @@ router.get("/available", async (req, res, next) => {
       FROM leave_types WHERE is_active = 'Y' ORDER BY name`
     );
 
-    // Convert database rows to LeaveType class instances
-    const leaveTypes = LeaveType.fromDatabaseRows(leaveTypesRows);
-
     res.json({
-      count: leaveTypes.length,
-      available_leave_types: leaveTypes.map((lt) => lt.toJSON()),
+      count: leaveTypesRows.length,
+      available_leave_types: leaveTypesRows,
     });
   } catch (error) {
     next(error);
@@ -208,9 +199,7 @@ router.get(
         throw new ApiError("Leave type not found", 404);
       }
 
-      // Convert database row to LeaveType class instance
-      const leaveType = LeaveType.fromDatabaseRow(leaveTypeRow);
-      res.json({ leave_type: leaveType.toJSON() });
+      res.json({ leave_type: leaveTypeRow });
     } catch (error) {
       next(error);
     }
@@ -222,7 +211,7 @@ router.get(
  * Update a leave type by leavetype_id
  * Requires: HR Manager or Admin role
  */
-router.patch("/:id", async (req, res, next) => {
+router.patch("/:id", requireHRManagerOrAdmin, async (req, res, next) => {
   const {
     name,
     description,
@@ -331,12 +320,9 @@ router.patch("/:id", async (req, res, next) => {
       [req.params.id]
     );
 
-    // Convert database row to LeaveType class instance
-    const leaveType = LeaveType.fromDatabaseRow(leaveTypeRow);
-
     res.json({
       message: "Leave type updated successfully",
-      leave_type: leaveType.toJSON(),
+      leave_type: leaveTypeRow,
     });
   } catch (error) {
     next(error);
@@ -349,7 +335,7 @@ router.patch("/:id", async (req, res, next) => {
  * Note: We don't hard delete to maintain referential integrity
  * Requires: HR Manager or Admin role
  */
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requireHRManagerOrAdmin, async (req, res, next) => {
   try {
     // Check if leave type exists
     const [[existing]] = await pool.query(

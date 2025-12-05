@@ -4,7 +4,8 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Leave = require("../../models/Leave");
+const { SELECT_EMPLOYEE_NAME, SELECT_EMPLOYEE_BY_MANAGER } = require("../../queries/employees");
+const logger = require("../../util/logger");
 
 /**
  * GET /managers/:managerEmpId/employees/:employeeId/leaves
@@ -23,15 +24,32 @@ router.get(
     const managerEmpId = req.params.managerEmpId;
     const employeeId = req.params.employeeId;
     const { start_date, end_date, status } = req.query;
+    const requestedBy = req.user?.empid || 'unknown';
+
+    logger.info(
+      { 
+        route: '/managers/:managerEmpId/employees/:employeeId/leaves', 
+        method: 'GET',
+        managerEmpId, 
+        employeeId,
+        requestedBy,
+        start_date,
+        end_date,
+        status,
+        ip: req.ip
+      }, 
+      'Manager fetching employee leaves'
+    );
 
     try {
       // Verify manager exists
       const [[manager]] = await pool.query(
-        "SELECT empid, name FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_NAME,
         [managerEmpId]
       );
 
       if (!manager) {
+        logger.warn({ route: '/managers/:managerEmpId/employees/:employeeId/leaves', method: 'GET', managerEmpId, requestedBy }, 'Manager not found');
         throw new ApiError("Manager not found", 404);
       }
 
@@ -110,17 +128,25 @@ router.get(
         params
       );
 
-      // Convert database rows to Leave class instances
-      const leaveRecords = Leave.fromDatabaseRows(rows);
-
       // Add leave type name to each leave record
-      const leavesWithDetails = leaveRecords.map((leave) => {
-        const row = rows.find((r) => r.id === leave.id);
+      const leavesWithDetails = rows.map((row) => {
         return {
-          ...leave.toJSON(),
+          ...row,
           leave_type_name: row?.leave_type_name || null,
         };
       });
+
+      logger.debug(
+        { 
+          route: '/managers/:managerEmpId/employees/:employeeId/leaves', 
+          method: 'GET',
+          managerEmpId, 
+          employeeId,
+          requestedBy,
+          leavesCount: leavesWithDetails.length
+        }, 
+        'Employee leaves retrieved successfully'
+      );
 
       res.json({
         manager_empid: managerEmpId,
@@ -136,6 +162,19 @@ router.get(
         leaves: leavesWithDetails,
       });
     } catch (error) {
+      logger.error(
+        { 
+          route: '/managers/:managerEmpId/employees/:employeeId/leaves', 
+          method: 'GET',
+          managerEmpId, 
+          employeeId,
+          requestedBy,
+          error: error.message,
+          stack: error.stack,
+          ip: req.ip
+        }, 
+        'Error fetching employee leaves'
+      );
       next(error);
     }
   }
@@ -152,15 +191,31 @@ router.get(
 router.get("/:managerEmpId/employees/leaves", async (req, res, next) => {
   const managerEmpId = req.params.managerEmpId;
   const { start_date, end_date, status } = req.query;
+  const requestedBy = req.user?.empid || 'unknown';
+
+  logger.info(
+    { 
+      route: '/managers/:managerEmpId/employees/leaves', 
+      method: 'GET',
+      managerEmpId, 
+      requestedBy,
+      start_date,
+      end_date,
+      status,
+      ip: req.ip
+    }, 
+    'Manager fetching team leaves'
+  );
 
   try {
     // Verify manager exists
     const [[manager]] = await pool.query(
-      "SELECT empid, name FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_NAME,
       [managerEmpId]
     );
 
     if (!manager) {
+      logger.warn({ route: '/managers/:managerEmpId/employees/leaves', method: 'GET', managerEmpId, requestedBy }, 'Manager not found');
       throw new ApiError("Manager not found", 404);
     }
 
@@ -212,6 +267,8 @@ router.get("/:managerEmpId/employees/leaves", async (req, res, next) => {
 
     const whereSql = `WHERE ${where.join(" AND ")}`;
 
+    console.log("whereSql", whereSql);
+
     // Get leaves with employee details
     const [rows] = await pool.query(
       `SELECT 
@@ -243,20 +300,27 @@ router.get("/:managerEmpId/employees/leaves", async (req, res, next) => {
       params
     );
 
-    // Convert database rows to Leave class instances
-    const leaveRecords = Leave.fromDatabaseRows(rows);
-
     // Add employee details to each leave record
-    const leavesWithDetails = leaveRecords.map((leave) => {
-      const row = rows.find((r) => r.id === leave.id);
+    const leavesWithDetails = rows.map((row) => {
       return {
-        ...leave.toJSON(),
+        ...row,
         employee_name: row?.employee_name || null,
         employee_email: row?.employee_email || null,
         department_name: row?.department_name || null,
         leave_type_name: row?.leave_type_name || null,
       };
     });
+
+    logger.debug(
+      { 
+        route: '/managers/:managerEmpId/employees/leaves', 
+        method: 'GET',
+        managerEmpId, 
+        requestedBy,
+        leavesCount: leavesWithDetails.length
+      }, 
+      'Team leaves retrieved successfully'
+    );
 
     res.json({
       manager_empid: managerEmpId,
@@ -268,6 +332,18 @@ router.get("/:managerEmpId/employees/leaves", async (req, res, next) => {
       leaves: leavesWithDetails,
     });
   } catch (error) {
+    logger.error(
+      { 
+        route: '/managers/:managerEmpId/employees/leaves', 
+        method: 'GET',
+        managerEmpId, 
+        requestedBy,
+        error: error.message,
+        stack: error.stack,
+        ip: req.ip
+      }, 
+      'Error fetching team leaves'
+    );
     next(error);
   }
 });

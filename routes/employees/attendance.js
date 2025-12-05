@@ -2,9 +2,11 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Attendance = require("../../models/Attendance");
-const Leave = require("../../models/Leave");
 const { empidParamValidator } = require("../../validations/employeeSchemas");
+const {
+  SELECT_EMPLOYEE_EXISTS,
+  SELECT_EMPLOYEE_NAME,
+} = require("../../queries/employees");
 const {
   createCorrectionRequestSchema,
   getCorrectionRequestsQuerySchema,
@@ -18,12 +20,16 @@ const {
   getMonthlyCalendar,
   getWorkingDays,
 } = require("../../util/calendarUtil");
+const { authorizeEmployee } = require("../../middlewares/rbac");
+const { withCache, CACHE_PREFIXES } = require("../../util/cacheUtil");
+const logger = require("../../util/logger");
 
 /**
  * POST /employees/:empid/attendance/clockin
  * Clock in for an employee
  * Body: attendance_date (YYYY-MM-DD), check_in_time (YYYY-MM-DD HH:MM:SS), shiftid (optional)
  * Returns: Check-in record with late status
+ * Requires: User can only clock in for themselves (USER role) or their direct reports (MANAGER role)
  */
 router.post(
   "/:empid/attendance/clockin",
@@ -44,16 +50,14 @@ router.post(
     body("shiftid").optional().trim(),
   ],
   handleValidationErrors,
+  authorizeEmployee,
   async (req, res, next) => {
     const { empid } = req.params;
     const { attendance_date, check_in_time, shiftid } = req.body;
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -210,6 +214,7 @@ function calculateTotalWorkHours(
  * Clock out for an employee
  * Body: attendance_date (YYYY-MM-DD), check_out_time (YYYY-MM-DD HH:MM:SS)
  * Returns: Check-out record with early leave status and total work hours
+ * Requires: User can only clock out for themselves (USER role) or their direct reports (MANAGER role)
  */
 router.post(
   "/:empid/attendance/clockout",
@@ -229,16 +234,14 @@ router.post(
       .withMessage("check_out_time must be a valid ISO 8601 datetime"),
   ],
   handleValidationErrors,
+  authorizeEmployee,
   async (req, res, next) => {
     const { empid } = req.params;
     const { attendance_date, check_out_time } = req.body;
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -341,6 +344,18 @@ router.get(
   handleValidationErrors,
   async (req, res, next) => {
     const { empid } = req.params;
+    const requestedBy = req.user?.empid || "unknown";
+
+    logger.info(
+      {
+        route: "/employees/:empid/attendance/today",
+        method: "GET",
+        empid,
+        requestedBy,
+        ip: req.ip,
+      },
+      "Fetching today's attendance"
+    );
 
     try {
       // Get today's date in YYYY-MM-DD format
@@ -351,12 +366,18 @@ router.get(
       const todayStr = `${year}-${month}-${day}`;
 
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid, name FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_NAME, [empid]);
 
       if (!employee) {
+        logger.warn(
+          {
+            route: "/employees/:empid/attendance/today",
+            method: "GET",
+            empid,
+            requestedBy,
+          },
+          "Employee not found"
+        );
         throw new ApiError("Employee not found", 404);
       }
 
@@ -482,11 +503,10 @@ router.get(
 
       // Set attendance data if record exists
       if (attendanceRecords.length > 0) {
-        const attendance = Attendance.fromDatabaseRow(attendanceRecords[0]);
-        response.attendance = attendance.toJSON();
+        response.attendance = attendanceRecords[0];
         // Set day_status based on attendance status
         // If explicitly marked ABSENT, use ABSENT; otherwise use the status from record
-        response.day_status = attendance.status || null;
+        response.day_status = response.attendance.status || null;
       } else {
         // No attendance record - check if ABSENT, EXPECTED, or INDETERMINATE
         // ABSENT if: working day AND no leaves (any status) AND date is today or past
@@ -503,8 +523,33 @@ router.get(
         }
       }
 
+      logger.debug(
+        {
+          route: "/employees/:empid/attendance/today",
+          method: "GET",
+          empid,
+          requestedBy,
+          date: todayStr,
+          hasAttendance: !!response.attendance,
+          dayStatus: response.day_status,
+        },
+        "Today's attendance retrieved successfully"
+      );
+
       return res.json(response);
     } catch (error) {
+      logger.error(
+        {
+          route: "/employees/:empid/attendance/today",
+          method: "GET",
+          empid,
+          requestedBy,
+          error: error.message,
+          stack: error.stack,
+          ip: req.ip,
+        },
+        "Error fetching today's attendance"
+      );
       next(error);
     }
   }
@@ -546,10 +591,7 @@ router.get(
 
     try {
       // Check if employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -596,13 +638,10 @@ router.get(
 
       const [items] = await pool.query(dataQuery, params);
 
-      // Convert database rows to Attendance class instances
-      const attendanceRecords = Attendance.fromDatabaseRows(items);
-
       res.status(200).json({
         empid,
-        count: attendanceRecords.length,
-        attendance: attendanceRecords.map((att) => att.toJSON()),
+        count: items.length,
+        attendance: items,
       });
     } catch (error) {
       next(error);
@@ -615,11 +654,13 @@ router.get(
  * Create a new attendance correction request
  * Body: attendance_record_id (optional), correction_date (YYYY-MM-DD), requested_check_in (optional), requested_check_out (optional), reason
  * Returns: Created correction request
+ * Requires: User can only create correction requests for themselves (USER role) or their direct reports (MANAGER role)
  */
 router.post(
   "/:empid/attendance/corrections",
   createCorrectionRequestSchema,
   handleValidationErrors,
+  authorizeEmployee,
   async (req, res, next) => {
     const { empid } = req.params;
     const {
@@ -632,10 +673,7 @@ router.post(
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -741,10 +779,7 @@ router.get(
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -819,15 +854,33 @@ router.get(
   handleValidationErrors,
   async (req, res, next) => {
     const { empid } = req.params;
+    const requestedBy = req.user?.empid || "unknown";
+
+    logger.info(
+      {
+        route: "/employees/:empid/attendance/corrections/eligible-dates",
+        method: "GET",
+        empid,
+        requestedBy,
+        ip: req.ip,
+      },
+      "Fetching eligible dates for correction requests"
+    );
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid, name FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_NAME, [empid]);
 
       if (!employee) {
+        logger.warn(
+          {
+            route: "/employees/:empid/attendance/corrections/eligible-dates",
+            method: "GET",
+            empid,
+            requestedBy,
+          },
+          "Employee not found"
+        );
         throw new ApiError("Employee not found", 404);
       }
 
@@ -1000,6 +1053,19 @@ router.get(
       // Sort by date (ascending)
       eligibleDates.sort((a, b) => a.date.localeCompare(b.date));
 
+      logger.debug(
+        {
+          route: "/employees/:empid/attendance/corrections/eligible-dates",
+          method: "GET",
+          empid,
+          requestedBy,
+          year,
+          month,
+          eligibleDatesCount: eligibleDates.length,
+        },
+        "Eligible dates retrieved successfully"
+      );
+
       res.json({
         empid: empid,
         employee_name: employee.name,
@@ -1011,6 +1077,18 @@ router.get(
         eligible_dates: eligibleDates,
       });
     } catch (error) {
+      logger.error(
+        {
+          route: "/employees/:empid/attendance/corrections/eligible-dates",
+          method: "GET",
+          empid,
+          requestedBy,
+          error: error.message,
+          stack: error.stack,
+          ip: req.ip,
+        },
+        "Error fetching eligible dates"
+      );
       next(error);
     }
   }
@@ -1020,6 +1098,7 @@ router.get(
  * POST /employees/:empid/attendance/corrections/:id/cancel
  * Cancel an attendance correction request (by employee)
  * Returns: Success message
+ * Requires: User can only cancel their own correction requests (USER role) or their direct reports' requests (MANAGER role)
  */
 router.post(
   "/:empid/attendance/corrections/:id/cancel",
@@ -1031,15 +1110,13 @@ router.post(
       .toInt(),
   ],
   handleValidationErrors,
+  authorizeEmployee,
   async (req, res, next) => {
     const { empid, id } = req.params;
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -1107,10 +1184,7 @@ router.get(
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid, name FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_NAME, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -1234,10 +1308,7 @@ router.get(
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -1299,6 +1370,7 @@ router.get(
  * Create a new overtime record for an employee
  * Body: overtime_date (YYYY-MM-DD), start_time (YYYY-MM-DD HH:MM:SS), end_time (YYYY-MM-DD HH:MM:SS), reason (optional)
  * Returns: Created overtime record ID
+ * Requires: User can only create overtime requests for themselves (USER role) or their direct reports (MANAGER role)
  */
 router.post(
   "/:empid/attendance/overtime",
@@ -1342,16 +1414,14 @@ router.post(
     }),
   ],
   handleValidationErrors,
+  authorizeEmployee,
   async (req, res, next) => {
     const { empid } = req.params;
     const { overtime_date, start_time, end_time, reason = null } = req.body;
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -1384,6 +1454,7 @@ router.post(
  * Update an overtime record (only PENDING records can be updated)
  * Body: start_time (optional), end_time (optional), reason (optional)
  * Returns: Success message
+ * Requires: User can only update their own overtime records (USER role) or their direct reports' records (MANAGER role)
  */
 router.patch(
   "/:empid/attendance/overtime/:id",
@@ -1419,16 +1490,14 @@ router.patch(
     }),
   ],
   handleValidationErrors,
+  authorizeEmployee,
   async (req, res, next) => {
     const { empid, id } = req.params;
     const { start_time, end_time, reason } = req.body;
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -1535,6 +1604,20 @@ router.get(
   async (req, res, next) => {
     const { empid } = req.params;
     let { start_date, end_date } = req.query;
+    const requestedBy = req.user?.empid || "unknown";
+
+    logger.info(
+      {
+        route: "/employees/:empid/calendar/attendance",
+        method: "GET",
+        empid,
+        requestedBy,
+        start_date,
+        end_date,
+        ip: req.ip,
+      },
+      "Fetching calendar attendance"
+    );
 
     try {
       // Default to current week if not provided
@@ -1587,10 +1670,7 @@ router.get(
       }
 
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid, name FROM employees WHERE empid = ?",
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_NAME, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -1784,6 +1864,19 @@ router.get(
         },
       };
 
+      logger.debug(
+        {
+          route: "/employees/:empid/calendar/attendance",
+          method: "GET",
+          empid,
+          requestedBy,
+          start_date,
+          end_date,
+          daysCount: comprehensiveCalendar.length,
+        },
+        "Calendar attendance retrieved successfully"
+      );
+
       res.json({
         message: "Attendance calendar generated successfully",
         empid: empid,
@@ -1794,6 +1887,20 @@ router.get(
         summary: summary,
       });
     } catch (error) {
+      logger.error(
+        {
+          route: "/employees/:empid/calendar/attendance",
+          method: "GET",
+          empid,
+          requestedBy,
+          start_date,
+          end_date,
+          error: error.message,
+          stack: error.stack,
+          ip: req.ip,
+        },
+        "Error fetching calendar attendance"
+      );
       next(error);
     }
   }
@@ -1821,6 +1928,19 @@ router.get(
   async (req, res, next) => {
     const { empid } = req.params;
     let { month } = req.query;
+    const requestedBy = req.user?.empid || "unknown";
+
+    logger.info(
+      {
+        route: "/employees/:empid/calendar/attendance/monthly",
+        method: "GET",
+        empid,
+        requestedBy,
+        month,
+        ip: req.ip,
+      },
+      "Fetching monthly calendar attendance"
+    );
 
     try {
       // Default to current month if not provided
@@ -1846,30 +1966,35 @@ router.get(
         throw new ApiError("year must be a valid year (2000-2100)", 400);
       }
 
-      // Validate employee exists
-      const [[employee]] = await pool.query(
-        "SELECT empid, name FROM employees WHERE empid = ?",
-        [empid]
-      );
+      // Build cache key
+      const cacheKey = `${CACHE_PREFIXES.EMPLOYEE}:${empid}:calendar:attendance:monthly:${month}`;
 
-      if (!employee) {
-        throw new ApiError("Employee not found", 404);
-      }
+      const result = await withCache(
+        async () => {
+          // Validate employee exists
+          const [[employee]] = await pool.query(SELECT_EMPLOYEE_NAME, [empid]);
 
-      // Calculate date range for the month
-      const startDateStr = `${yearNum}-${String(monthNum).padStart(2, "0")}-01`;
-      const lastDay = new Date(yearNum, monthNum, 0).getDate();
-      const endDateStr = `${yearNum}-${String(monthNum).padStart(
-        2,
-        "0"
-      )}-${String(lastDay).padStart(2, "0")}`;
+          if (!employee) {
+            throw new ApiError("Employee not found", 404);
+          }
 
-      // 1. Get monthly calendar (working days, holidays, weekly offs)
-      const calendar = await getMonthlyCalendar(empid, yearNum, monthNum);
+          // Calculate date range for the month
+          const startDateStr = `${yearNum}-${String(monthNum).padStart(
+            2,
+            "0"
+          )}-01`;
+          const lastDay = new Date(yearNum, monthNum, 0).getDate();
+          const endDateStr = `${yearNum}-${String(monthNum).padStart(
+            2,
+            "0"
+          )}-${String(lastDay).padStart(2, "0")}`;
 
-      // 2. Get attendance records for the month
-      const [attendanceRecords] = await pool.query(
-        `SELECT 
+          // 1. Get monthly calendar (working days, holidays, weekly offs)
+          const calendar = await getMonthlyCalendar(empid, yearNum, monthNum);
+
+          // 2. Get attendance records for the month
+          const [attendanceRecords] = await pool.query(
+            `SELECT 
           ar.id,
           DATE_FORMAT(ar.attendance_date, '%Y-%m-%d') as attendance_date,
           ar.shiftid,
@@ -1889,12 +2014,12 @@ router.get(
           AND ar.attendance_date >= ? 
           AND ar.attendance_date <= ?
         ORDER BY ar.attendance_date ASC`,
-        [empid, startDateStr, endDateStr]
-      );
+            [empid, startDateStr, endDateStr]
+          );
 
-      // 3. Get leaves for the month (leaves that overlap with the month)
-      const [leaves] = await pool.query(
-        `SELECT 
+          // 3. Get leaves for the month (leaves that overlap with the month)
+          const [leaves] = await pool.query(
+            `SELECT 
           l.id,
           l.leavetype_id,
           DATE_FORMAT(l.start_date, '%Y-%m-%d') as start_date,
@@ -1912,12 +2037,12 @@ router.get(
           AND l.start_date <= ?
           AND l.end_date >= ?
         ORDER BY l.start_date ASC`,
-        [empid, endDateStr, startDateStr]
-      );
+            [empid, endDateStr, startDateStr]
+          );
 
-      // 4. Get pending attendance correction requests for the month
-      const [correctionRequests] = await pool.query(
-        `SELECT 
+          // 4. Get pending attendance correction requests for the month
+          const [correctionRequests] = await pool.query(
+            `SELECT 
           acr.id,
           acr.empid,
           acr.attendance_record_id,
@@ -1936,187 +2061,221 @@ router.get(
           AND acr.correction_date <= ?
           AND acr.status = 'PENDING'
         ORDER BY acr.correction_date ASC`,
-        [empid, startDateStr, endDateStr]
+            [empid, startDateStr, endDateStr]
+          );
+
+          // Create maps for quick lookup
+          const attendanceMap = new Map();
+          attendanceRecords.forEach((record) => {
+            attendanceMap.set(record.attendance_date, record);
+          });
+
+          // Create a map of leaves by date (a leave can span multiple days)
+          const leavesMap = new Map();
+          leaves.forEach((leave) => {
+            const startDate = new Date(leave.start_date);
+            const endDate = new Date(leave.end_date);
+            const currentDate = new Date(startDate);
+
+            while (currentDate <= endDate) {
+              const dateStr = currentDate.toISOString().split("T")[0];
+              // Only include dates within the requested month
+              if (dateStr >= startDateStr && dateStr <= endDateStr) {
+                if (!leavesMap.has(dateStr)) {
+                  leavesMap.set(dateStr, []);
+                }
+                leavesMap.get(dateStr).push({
+                  id: leave.id,
+                  leavetype_id: leave.leavetype_id,
+                  leave_type_name: leave.leave_type_name,
+                  start_date: leave.start_date,
+                  end_date: leave.end_date,
+                  total_days: leave.total_days,
+                  reason: leave.reason,
+                  status: leave.status,
+                  approved_by: leave.approved_by,
+                  approved_at: leave.approved_at,
+                  rejection_reason: leave.rejection_reason,
+                });
+              }
+              currentDate.setDate(currentDate.getDate() + 1);
+            }
+          });
+
+          // Create a map of pending correction requests by date
+          const correctionRequestsMap = new Map();
+          correctionRequests.forEach((request) => {
+            const dateStr = request.correction_date;
+            if (!correctionRequestsMap.has(dateStr)) {
+              correctionRequestsMap.set(dateStr, []);
+            }
+            correctionRequestsMap.get(dateStr).push({
+              id: request.id,
+              attendance_record_id: request.attendance_record_id,
+              correction_date: request.correction_date,
+              requested_check_in: request.requested_check_in,
+              requested_check_out: request.requested_check_out,
+              reason: request.reason,
+              status: request.status,
+              applied_at: request.applied_at,
+              approved_at: request.approved_at,
+              rejection_reason: request.rejection_reason,
+              remarks: request.remarks,
+            });
+          });
+
+          // Combine calendar, attendance, leave, and correction request data for each day
+          const comprehensiveCalendar = calendar.calendar.map((day) => {
+            const dateStr = day.date;
+            const attendance = attendanceMap.get(dateStr) || null;
+            const dayLeaves = leavesMap.get(dateStr) || [];
+            const dayCorrectionRequests =
+              correctionRequestsMap.get(dateStr) || [];
+
+            return {
+              date: dateStr,
+              // Calendar information
+              is_working_day: day.is_working_day,
+              calendar_reason: day.reason,
+              calendar_type: day.type,
+              // Attendance information
+              attendance: attendance
+                ? {
+                    id: attendance.id,
+                    shiftid: attendance.shiftid,
+                    check_in_time: attendance.check_in_time,
+                    check_out_time: attendance.check_out_time,
+                    break_start_time: attendance.break_start_time,
+                    break_end_time: attendance.break_end_time,
+                    total_work_hours: attendance.total_work_hours,
+                    status: attendance.status,
+                    is_late: attendance.is_late,
+                    is_early_leave: attendance.is_early_leave,
+                    late_minutes: attendance.late_minutes,
+                    early_leave_minutes: attendance.early_leave_minutes,
+                    remarks: attendance.remarks,
+                  }
+                : null,
+              // Leave information
+              leaves: dayLeaves,
+              // Attendance correction requests (pending only)
+              correction_requests: dayCorrectionRequests,
+              // Combined status
+              // Note: If there's a pending correction request, day_status cannot be ABSENT
+              // ABSENT if:
+              // 1. status is explicitly marked ABSENT in attendance_records, OR
+              // 2. no attendance record AND no leaves (any status) AND is working day AND no pending correction requests
+              // Otherwise: INDETERMINATE
+              day_status:
+                dayCorrectionRequests.length > 0
+                  ? "CORRECTION_PENDING" // If there's a pending correction request, status cannot be ABSENT
+                  : attendance
+                  ? attendance.status === "ABSENT"
+                    ? "ABSENT"
+                    : attendance.status || "INDETERMINATE"
+                  : dayLeaves.length > 0
+                  ? dayLeaves[0].status === "APPROVED"
+                    ? "ON_LEAVE"
+                    : dayLeaves[0].status === "PENDING"
+                    ? "LEAVE_PENDING"
+                    : "INDETERMINATE"
+                  : day.is_working_day
+                  ? (() => {
+                      // Check if date is in the future
+                      const dateObj = new Date(day.date + "T00:00:00");
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const isFutureDate = dateObj > today;
+
+                      // Future dates: EXPECTED, Past dates: ABSENT
+                      return isFutureDate ? "EXPECTED" : "ABSENT";
+                    })()
+                  : "NON_WORKING", // Non-working day = NON_WORKING
+            };
+          });
+
+          // Calculate comprehensive summary
+          const summary = {
+            ...calendar.summary,
+            attendance: {
+              present: comprehensiveCalendar.filter(
+                (d) => d.attendance && d.attendance.status === "PRESENT"
+              ).length,
+              absent: comprehensiveCalendar.filter(
+                (d) => d.day_status === "ABSENT"
+              ).length,
+              late_arrivals: comprehensiveCalendar.filter(
+                (d) => d.attendance && d.attendance.is_late === "Y"
+              ).length,
+              early_departures: comprehensiveCalendar.filter(
+                (d) => d.attendance && d.attendance.is_early_leave === "Y"
+              ).length,
+              total_work_hours: comprehensiveCalendar.reduce(
+                (sum, d) =>
+                  sum + (parseFloat(d.attendance?.total_work_hours) || 0),
+                0
+              ),
+            },
+            leaves: {
+              approved: comprehensiveCalendar.filter((d) =>
+                d.leaves.some((l) => l.status === "APPROVED")
+              ).length,
+              pending: comprehensiveCalendar.filter((d) =>
+                d.leaves.some((l) => l.status === "PENDING")
+              ).length,
+              rejected: comprehensiveCalendar.filter((d) =>
+                d.leaves.some((l) => l.status === "REJECTED")
+              ).length,
+            },
+            correction_requests: {
+              pending: comprehensiveCalendar.filter(
+                (d) => d.correction_requests && d.correction_requests.length > 0
+              ).length,
+            },
+          };
+
+          return {
+            message: "Attendance calendar generated successfully",
+            empid: empid,
+            employee_name: employee.name,
+            year: yearNum,
+            month: monthNum,
+            calendar: comprehensiveCalendar,
+            summary: summary,
+            source_calendars: calendar.source_calendars,
+          };
+        },
+        cacheKey,
+        3600 // 1 hour TTL
       );
 
-      // Create maps for quick lookup
-      const attendanceMap = new Map();
-      attendanceRecords.forEach((record) => {
-        attendanceMap.set(record.attendance_date, record);
-      });
-
-      // Create a map of leaves by date (a leave can span multiple days)
-      const leavesMap = new Map();
-      leaves.forEach((leave) => {
-        const startDate = new Date(leave.start_date);
-        const endDate = new Date(leave.end_date);
-        const currentDate = new Date(startDate);
-
-        while (currentDate <= endDate) {
-          const dateStr = currentDate.toISOString().split("T")[0];
-          // Only include dates within the requested month
-          if (dateStr >= startDateStr && dateStr <= endDateStr) {
-            if (!leavesMap.has(dateStr)) {
-              leavesMap.set(dateStr, []);
-            }
-            leavesMap.get(dateStr).push({
-              id: leave.id,
-              leavetype_id: leave.leavetype_id,
-              leave_type_name: leave.leave_type_name,
-              start_date: leave.start_date,
-              end_date: leave.end_date,
-              total_days: leave.total_days,
-              reason: leave.reason,
-              status: leave.status,
-              approved_by: leave.approved_by,
-              approved_at: leave.approved_at,
-              rejection_reason: leave.rejection_reason,
-            });
-          }
-          currentDate.setDate(currentDate.getDate() + 1);
-        }
-      });
-
-      // Create a map of pending correction requests by date
-      const correctionRequestsMap = new Map();
-      correctionRequests.forEach((request) => {
-        const dateStr = request.correction_date;
-        if (!correctionRequestsMap.has(dateStr)) {
-          correctionRequestsMap.set(dateStr, []);
-        }
-        correctionRequestsMap.get(dateStr).push({
-          id: request.id,
-          attendance_record_id: request.attendance_record_id,
-          correction_date: request.correction_date,
-          requested_check_in: request.requested_check_in,
-          requested_check_out: request.requested_check_out,
-          reason: request.reason,
-          status: request.status,
-          applied_at: request.applied_at,
-          approved_at: request.approved_at,
-          rejection_reason: request.rejection_reason,
-          remarks: request.remarks,
-        });
-      });
-
-      // Combine calendar, attendance, leave, and correction request data for each day
-      const comprehensiveCalendar = calendar.calendar.map((day) => {
-        const dateStr = day.date;
-        const attendance = attendanceMap.get(dateStr) || null;
-        const dayLeaves = leavesMap.get(dateStr) || [];
-        const dayCorrectionRequests = correctionRequestsMap.get(dateStr) || [];
-
-        return {
-          date: dateStr,
-          // Calendar information
-          is_working_day: day.is_working_day,
-          calendar_reason: day.reason,
-          calendar_type: day.type,
-          // Attendance information
-          attendance: attendance
-            ? {
-                id: attendance.id,
-                shiftid: attendance.shiftid,
-                check_in_time: attendance.check_in_time,
-                check_out_time: attendance.check_out_time,
-                break_start_time: attendance.break_start_time,
-                break_end_time: attendance.break_end_time,
-                total_work_hours: attendance.total_work_hours,
-                status: attendance.status,
-                is_late: attendance.is_late,
-                is_early_leave: attendance.is_early_leave,
-                late_minutes: attendance.late_minutes,
-                early_leave_minutes: attendance.early_leave_minutes,
-                remarks: attendance.remarks,
-              }
-            : null,
-          // Leave information
-          leaves: dayLeaves,
-          // Attendance correction requests (pending only)
-          correction_requests: dayCorrectionRequests,
-          // Combined status
-          // Note: If there's a pending correction request, day_status cannot be ABSENT
-          // ABSENT if:
-          // 1. status is explicitly marked ABSENT in attendance_records, OR
-          // 2. no attendance record AND no leaves (any status) AND is working day AND no pending correction requests
-          // Otherwise: INDETERMINATE
-          day_status:
-            dayCorrectionRequests.length > 0
-              ? "CORRECTION_PENDING" // If there's a pending correction request, status cannot be ABSENT
-              : attendance
-              ? attendance.status === "ABSENT"
-                ? "ABSENT"
-                : attendance.status || "INDETERMINATE"
-              : dayLeaves.length > 0
-              ? dayLeaves[0].status === "APPROVED"
-                ? "ON_LEAVE"
-                : dayLeaves[0].status === "PENDING"
-                ? "LEAVE_PENDING"
-                : "INDETERMINATE"
-              : day.is_working_day
-              ? (() => {
-                  // Check if date is in the future
-                  const dateObj = new Date(day.date + "T00:00:00");
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  const isFutureDate = dateObj > today;
-
-                  // Future dates: EXPECTED, Past dates: ABSENT
-                  return isFutureDate ? "EXPECTED" : "ABSENT";
-                })()
-              : "NON_WORKING", // Non-working day = NON_WORKING
-        };
-      });
-
-      // Calculate comprehensive summary
-      const summary = {
-        ...calendar.summary,
-        attendance: {
-          present: comprehensiveCalendar.filter(
-            (d) => d.attendance && d.attendance.status === "PRESENT"
-          ).length,
-          absent: comprehensiveCalendar.filter((d) => d.day_status === "ABSENT")
-            .length,
-          late_arrivals: comprehensiveCalendar.filter(
-            (d) => d.attendance && d.attendance.is_late === "Y"
-          ).length,
-          early_departures: comprehensiveCalendar.filter(
-            (d) => d.attendance && d.attendance.is_early_leave === "Y"
-          ).length,
-          total_work_hours: comprehensiveCalendar.reduce(
-            (sum, d) => sum + (parseFloat(d.attendance?.total_work_hours) || 0),
-            0
-          ),
+      logger.debug(
+        {
+          route: "/employees/:empid/calendar/attendance/monthly",
+          method: "GET",
+          empid,
+          requestedBy,
+          month,
+          daysCount: result.calendar?.length || 0,
         },
-        leaves: {
-          approved: comprehensiveCalendar.filter((d) =>
-            d.leaves.some((l) => l.status === "APPROVED")
-          ).length,
-          pending: comprehensiveCalendar.filter((d) =>
-            d.leaves.some((l) => l.status === "PENDING")
-          ).length,
-          rejected: comprehensiveCalendar.filter((d) =>
-            d.leaves.some((l) => l.status === "REJECTED")
-          ).length,
-        },
-        correction_requests: {
-          pending: comprehensiveCalendar.filter(
-            (d) => d.correction_requests && d.correction_requests.length > 0
-          ).length,
-        },
-      };
+        "Monthly calendar attendance retrieved successfully"
+      );
 
-      res.json({
-        message: "Attendance calendar generated successfully",
-        empid: empid,
-        employee_name: employee.name,
-        year: yearNum,
-        month: monthNum,
-        calendar: comprehensiveCalendar,
-        summary: summary,
-        source_calendars: calendar.source_calendars,
-      });
+      res.json(result);
     } catch (error) {
+      logger.error(
+        {
+          route: "/employees/:empid/calendar/attendance/monthly",
+          method: "GET",
+          empid,
+          requestedBy,
+          month,
+          error: error.message,
+          stack: error.stack,
+          ip: req.ip,
+        },
+        "Error fetching monthly calendar attendance"
+      );
       next(error);
     }
   }

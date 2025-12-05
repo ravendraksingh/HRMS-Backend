@@ -16,7 +16,12 @@ if (!JWT_SECRET) {
   );
 }
 
-const TOKEN_SECRET = "id8sJrY3n+jUhIHfNXC/UVLrWmmRTYghLRdtqHglGTY=";
+const TOKEN_SECRET = process.env.TOKEN_SECRET;
+if (!TOKEN_SECRET) {
+  throw new Error(
+    "TOKEN_SECRET environment variable is required. Please set it in your .env file."
+  );
+}
 const encodedKey = new TextEncoder().encode(TOKEN_SECRET);
 
 const keyBuffer = crypto.randomBytes(32);

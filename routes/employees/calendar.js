@@ -5,6 +5,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
+const { SELECT_EMPLOYEE_EXISTS } = require("../../queries/employees");
 const {
   resolveEmployeeCalendar,
   getMonthlyCalendar,
@@ -48,7 +49,7 @@ router.get(
     try {
       // Validate employee exists
       const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [empid]
       );
 
@@ -93,7 +94,7 @@ router.get(
     try {
       // Validate employee exists
       const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [empid]
       );
 
@@ -155,7 +156,7 @@ router.get(
     try {
       // Validate employee exists
       const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [empid]
       );
 
@@ -204,7 +205,7 @@ router.get(
     try {
       // Validate employee exists
       const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [empid]
       );
 

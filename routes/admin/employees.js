@@ -187,4 +187,111 @@ router.get("/users", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /admin/dashboard
+ * Get admin dashboard summary
+ * Returns: Summary statistics including users, departments, locations, system health, and hourly login data
+ */
+router.get("/dashboard", async (req, res, next) => {
+  try {
+    const timestamp = new Date().toISOString();
+    const uptime = process.uptime();
+
+    // Test database connection for system health
+    let dbConnected = false;
+    let dbInfo = null;
+    try {
+      const connection = await pool.getConnection();
+      await connection.ping();
+      const [[dbInfoResult]] = await connection.query(
+        "SELECT VERSION() as version, DATABASE() as `database`"
+      );
+      dbInfo = dbInfoResult;
+      dbConnected = true;
+      connection.release();
+    } catch (dbError) {
+      dbConnected = false;
+    }
+
+    // Get user statistics
+    const [[userStats]] = await pool.query(`
+      SELECT 
+        COUNT(*) as total_users,
+        SUM(CASE WHEN is_active = 'Y' THEN 1 ELSE 0 END) as active_users,
+        SUM(CASE WHEN last_login IS NOT NULL AND last_login >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as logged_in_users_24h
+      FROM users
+    `);
+
+    // Get department count
+    const [[deptStats]] = await pool.query(`
+      SELECT COUNT(*) as total_departments
+      FROM departments
+    `);
+
+    // Get location count
+    const [[locationStats]] = await pool.query(`
+      SELECT COUNT(*) as total_locations
+      FROM office_locations
+    `);
+
+    // Get hourly logged-in users summary for the last 24 hours
+    const [hourlyLogins] = await pool.query(`
+      SELECT 
+        DATE_FORMAT(last_login, '%Y-%m-%d %H:00:00') as hour,
+        COUNT(*) as user_count
+      FROM users
+      WHERE last_login IS NOT NULL 
+        AND last_login >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+      GROUP BY DATE_FORMAT(last_login, '%Y-%m-%d %H:00:00')
+      ORDER BY hour DESC
+    `);
+
+    // Format hourly data
+    const hourlyLoggedInUsers = hourlyLogins.map((row) => ({
+      hour: row.hour,
+      user_count: row.user_count,
+    }));
+
+    // Build system health object
+    const systemHealth = {
+      status: dbConnected ? "ok" : "error",
+      database: {
+        connected: dbConnected,
+        version: dbInfo?.version || null,
+        database: dbInfo?.database || null,
+      },
+      server: {
+        uptime: `${Math.floor(uptime)}s`,
+        environment: process.env.NODE_ENV || "development",
+        node_version: process.version,
+      },
+      timestamp: timestamp,
+    };
+
+    // Build response
+    const dashboard = {
+      summary: {
+        users: {
+          total: parseInt(userStats.total_users) || 0,
+          active: parseInt(userStats.active_users) || 0,
+          logged_in_24h: parseInt(userStats.logged_in_users_24h) || 0,
+        },
+        departments: {
+          total: parseInt(deptStats.total_departments) || 0,
+        },
+        locations: {
+          total: parseInt(locationStats.total_locations) || 0,
+        },
+      },
+      system_health: systemHealth,
+      hourly_logged_in_users: hourlyLoggedInUsers,
+      generated_at: timestamp,
+    };
+
+    res.json(dashboard);
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

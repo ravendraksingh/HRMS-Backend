@@ -3,6 +3,7 @@ const {
   isActiveValidator,
   urlValidator,
   dateValidator,
+  phoneValidator,
 } = require("./commonValidators");
 
 // ============================================
@@ -60,28 +61,6 @@ const updateOrganizationSchema = [
     .isIn(["Y", "N", "y", "n"])
     .withMessage("is_active must be 'Y' or 'N'")
     .toUpperCase(),
-  body("financial_year")
-    .notEmpty()
-    .withMessage("financial_year is required")
-    .matches(/^\d{4}(-\d{2})?$/)
-    .withMessage(
-      "financial_year must be in format YYYY or YYYY-YY (e.g., 2024 or 2024-25)"
-    )
-    .trim(),
-  dateValidator("fy_start_date", true), // Required
-  dateValidator("fy_end_date", true), // Required
-  // Custom validation: ensure fy_end_date is after fy_start_date
-  body().custom((value, { req }) => {
-    const { fy_start_date, fy_end_date } = req.body;
-    if (fy_start_date && fy_end_date) {
-      const startDate = new Date(fy_start_date);
-      const endDate = new Date(fy_end_date);
-      if (endDate <= startDate) {
-        throw new Error("fy_end_date must be after fy_start_date");
-      }
-    }
-    return true;
-  }),
 ];
 
 module.exports = {

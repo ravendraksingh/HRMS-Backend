@@ -235,19 +235,36 @@ authFolder.item.push(
     {
       refresh_token: "{{refresh_token}}",
     },
-    "noauth"
+    "noauth",
+    "Refresh access token using a valid refresh token. Returns a new access token (expires in 15 minutes). New access token is automatically saved."
   ),
   createRequest("Logout", "POST", "/auth/logout", {
     refresh_token: "{{refresh_token}}",
   }),
-  createRequest(
-    "Get User by EmpID",
-    "GET",
-    "/auth/users/:empid",
-    null,
-    "noauth"
-  )
 );
+
+// Add test script to refresh token request to save new access token
+const refreshTokenIndex = authFolder.item.findIndex(item => item.name === "Refresh Token");
+if (refreshTokenIndex !== -1) {
+  authFolder.item[refreshTokenIndex].event = [
+    {
+      listen: "test",
+      script: {
+        exec: [
+          "if (pm.response.code === 200) {",
+          "    var jsonData = pm.response.json();",
+          "    if (jsonData.access_token) {",
+          "        pm.collectionVariables.set('token', jsonData.access_token);",
+          "        pm.environment.set('token', jsonData.access_token);",
+          "        console.log('✅ New access token saved');",
+          "    }",
+          "}",
+        ],
+        type: "text/javascript",
+      },
+    },
+  ];
+}
 
 // 2. Status
 const statusFolder = getOrCreateFolder("Status");
@@ -265,20 +282,6 @@ statusFolder.item = [
 // 3. Employees
 const empFolder = getOrCreateFolder("Employees");
 empFolder.item = [
-  createRequest(
-    "Get All Employees",
-    "GET",
-    "/employees",
-    null,
-    null,
-    "Get all employees with optional filters",
-    [
-      { key: "department_id", value: "", description: "Filter by department ID", disabled: true },
-      { key: "manager_id", value: "", description: "Filter by manager ID", disabled: true },
-      { key: "location_id", value: "", description: "Filter by location ID", disabled: true },
-      { key: "name", value: "", description: "Filter by name (partial match)", disabled: true },
-    ]
-  ),
   createRequest("Get Employee by ID", "GET", "/employees/:empid"),
   createRequest("Create Employee", "POST", "/employees", {
     empid: "EMP-001",
@@ -1089,48 +1092,52 @@ managersFolder.item = [
     "/managers/:managerEmpId/employees/attendance",
     null,
     null,
-    "Get team attendance",
+    "Get team attendance data. If start_date and end_date are not provided, defaults to today's date.",
     [
-      { key: "start_date", value: "2024-01-01", description: "Start date in YYYY-MM-DD format", disabled: true },
-      { key: "end_date", value: "2024-12-31", description: "End date in YYYY-MM-DD format", disabled: true },
+      { key: "start_date", value: "2024-01-01", description: "Start date in YYYY-MM-DD format (co-mandatory with end_date)", disabled: true },
+      { key: "end_date", value: "2024-12-31", description: "End date in YYYY-MM-DD format (co-mandatory with start_date)", disabled: true },
       { key: "status", value: "PRESENT", description: "Filter by status: PRESENT, ABSENT, etc.", disabled: true },
+      { key: "empid", value: "", description: "Filter by specific employee ID", disabled: true },
     ]
   ),
   createRequest(
-    "Get Pending Attendance Corrections",
-    "GET",
-    "/managers/:managerEmpId/employees/attendance/corrections/pending",
-    null,
-    null,
-    "Get pending attendance corrections for team",
-    [
-      { key: "from_date", value: "2024-01-01", description: "Filter from date (YYYY-MM-DD)", disabled: true },
-      { key: "to_date", value: "2024-12-31", description: "Filter to date (YYYY-MM-DD)", disabled: true },
-    ]
-  ),
-  createRequest(
-    "Get All Attendance Corrections",
+    "Get Attendance Corrections for Team",
     "GET",
     "/managers/:managerEmpId/employees/attendance/corrections",
     null,
     null,
-    "Get all attendance corrections for team",
+    "Get attendance corrections for team members (all statuses). Use status=PENDING to filter for pending only.",
     [
-      { key: "from_date", value: "2024-01-01", description: "Filter from date (YYYY-MM-DD)", disabled: true },
-      { key: "to_date", value: "2024-12-31", description: "Filter to date (YYYY-MM-DD)", disabled: true },
+      { key: "start_date", value: "2024-01-01", description: "Filter from date (YYYY-MM-DD)", disabled: true },
+      { key: "end_date", value: "2024-12-31", description: "Filter to date (YYYY-MM-DD)", disabled: true },
+      { key: "empid", value: "", description: "Filter by specific employee ID", disabled: true },
       { key: "status", value: "PENDING", description: "Filter by status: PENDING, APPROVED, REJECTED", disabled: true },
     ]
   ),
   createRequest(
-    "Get Pending Leave Requests",
+    "Get Leaves for Specific Employee",
     "GET",
-    "/managers/:id/leaves/pending",
+    "/managers/:managerEmpId/employees/:employeeId/leaves",
     null,
     null,
-    "Get pending leave requests for team",
+    "Get leave details for a specific employee reporting to a manager",
     [
-      { key: "from", value: "2024-01-01", description: "Filter from date (YYYY-MM-DD)", disabled: true },
-      { key: "to", value: "2024-12-31", description: "Filter to date (YYYY-MM-DD)", disabled: true },
+      { key: "start_date", value: "2024-01-01", description: "Filter from date (YYYY-MM-DD) - returns leaves that overlap with date range", disabled: true },
+      { key: "end_date", value: "2024-12-31", description: "Filter to date (YYYY-MM-DD) - returns leaves that overlap with date range", disabled: true },
+      { key: "status", value: "PENDING", description: "Filter by status: PENDING, APPROVED, REJECTED, CANCELLED", disabled: true },
+    ]
+  ),
+  createRequest(
+    "Get Leaves for Team",
+    "GET",
+    "/managers/:managerEmpId/employees/leaves",
+    null,
+    null,
+    "Get leave details for all employees reporting to a manager",
+    [
+      { key: "start_date", value: "2024-01-01", description: "Filter from date (YYYY-MM-DD) - returns leaves that overlap with date range", disabled: true },
+      { key: "end_date", value: "2024-12-31", description: "Filter to date (YYYY-MM-DD) - returns leaves that overlap with date range", disabled: true },
+      { key: "status", value: "PENDING", description: "Filter by status: PENDING, APPROVED, REJECTED, CANCELLED", disabled: true },
     ]
   ),
   createRequest(
@@ -1596,6 +1603,14 @@ usersFolder.item = [
       { key: "is_active", value: "Y", description: "Filter by active status: Y or N", disabled: true },
     ]
   ),
+  createRequest(
+    "Get User Profile",
+    "GET",
+    "/users/:username/profile",
+    null,
+    null,
+    "Get comprehensive user profile with user details, employee information, and role details"
+  ),
   createRequest("Get User by Username", "GET", "/users/:username"),
   createRequest("Create User", "POST", "/users", {
     empid: "EMP-001",
@@ -1604,19 +1619,19 @@ usersFolder.item = [
     is_active: "Y",
     roleids: ["USER"],
   }),
-  createRequest("Update User", "PATCH", "/users/:empid", {
+  createRequest("Update User", "PATCH", "/users/:username", {
     is_active: "N",
     roleids: ["USER", "ADMIN"],
   }),
-  createRequest("Delete User", "DELETE", "/users/:empid"),
-  createRequest("Assign Role to User", "POST", "/users/:empid/roles", {
+  createRequest("Delete User", "DELETE", "/users/:username"),
+  createRequest("Assign Role to User", "POST", "/users/:username/roles", {
     roleid: "ADMIN",
     assignedBy: "EMP-002",
   }),
   createRequest(
     "Remove Role from User",
     "DELETE",
-    "/users/:empid/roles/:roleid"
+    "/users/:username/roles/:roleid"
   ),
 ];
 
@@ -1677,6 +1692,14 @@ onboardingFolder.item = [
 // 36. Admin
 const adminFolder = getOrCreateFolder("Admin");
 adminFolder.item = [
+  createRequest(
+    "Get Dashboard",
+    "GET",
+    "/admin/dashboard",
+    null,
+    null,
+    "Get admin dashboard summary with user statistics, department count, location count, system health, and hourly logged-in users summary"
+  ),
   createRequest("Get All Employees (Admin)", "GET", "/admin/all-employees"),
   createRequest(
     "Get Employees (Admin)",

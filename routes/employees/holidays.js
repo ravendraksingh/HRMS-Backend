@@ -4,8 +4,8 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Holiday = require("../../models/Holiday");
 const { resolveEmployeeCalendar } = require("../../util/calendarUtil");
+const { SELECT_EMPLOYEE_EXISTS } = require("../../queries/employees");
 const { empidParamValidator } = require("../../validations/employeeSchemas");
 const { handleValidationErrors } = require("../../util/validation");
 const { query } = require("express-validator");
@@ -25,7 +25,7 @@ router.get("/:empid/holidays", async (req, res, next) => {
   try {
     // Validate employee exists
     const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_EXISTS,
       [empid]
     );
 
@@ -39,7 +39,7 @@ router.get("/:empid/holidays", async (req, res, next) => {
     // If not provided, fetch from organization table
     if (!financialYearToUse) {
       const [[organization]] = await pool.query(
-        "SELECT financial_year FROM organization LIMIT 1"
+        "SELECT financial_year FROM financial_years WHERE is_current = 'Y' LIMIT 1"
       );
       financialYearToUse = organization.financial_year;
     }
@@ -72,9 +72,9 @@ router.get("/:empid/holidays", async (req, res, next) => {
       return holidayYear === startYear || holidayYear === endYear;
     });
 
-    // Convert to Holiday model instances for consistent formatting
-    const holidayInstances = holidays.map((h) => {
-      return Holiday.fromDatabaseRow({
+    // Format holidays for consistent response
+    const formattedHolidays = holidays.map((h) => {
+      return {
         id: h.id,
         name: h.holiday_name || h.name,
         holiday_date: h.holiday_date,
@@ -82,14 +82,14 @@ router.get("/:empid/holidays", async (req, res, next) => {
         is_override: h.is_override,
         description: h.description,
         calendar_id: h.calendar_id || null,
-      });
+      };
     });
 
     res.json({
       empid,
       financial_year: financialYearToUse,
-      count: holidayInstances.length,
-      holidays: holidayInstances.map((holiday) => holiday.toJSON()),
+      count: formattedHolidays.length,
+      holidays: formattedHolidays,
       source_calendars: calendar.source_calendars || [],
     });
   } catch (error) {

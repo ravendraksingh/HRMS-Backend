@@ -75,27 +75,25 @@ class ApiError extends Error {
    */
   toJSON() {
     const errorObj = {
-      error: {
-        message: this.message,
-        code: this.code,
-        status: this.status,
-        // timestamp: this.timestamp,
-      },
+      message: this.message,
+      code: this.code,
+      status: this.status,
+      // timestamp: this.timestamp,
     };
 
     // Add details if present
     if (this.details) {
-      errorObj.error.details = this.details;
+      errorObj.details = this.details;
     }
 
     // Add stack trace in development mode
     if (process.env.NODE_ENV === "development" && this.stack) {
-      errorObj.error.stack = this.stack;
+      errorObj.stack = this.stack;
     }
 
     // Add original error info in development mode
     if (process.env.NODE_ENV === "development" && this.originalError) {
-      errorObj.error.originalError = {
+      errorObj.originalError = {
         message: this.originalError.message,
         name: this.originalError.name,
       };

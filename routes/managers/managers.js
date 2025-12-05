@@ -4,6 +4,8 @@ const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
 const { getTodayDate } = require("../../util/dateTimeUtil");
+const { SELECT_EMPLOYEE_NAME } = require("../../queries/employees");
+const logger = require("../../util/logger");
 
 /**
  * GET /managers/:managerEmpId/employees
@@ -12,14 +14,25 @@ const { getTodayDate } = require("../../util/dateTimeUtil");
  */
 router.get("/:managerEmpId/employees", async (req, res, next) => {
   const managerEmpId = req.params.managerEmpId;
+  const requestedBy = req.user?.empid || 'unknown';
+
+  logger.info(
+    { 
+      route: '/managers/:managerEmpId/employees', 
+      method: 'GET',
+      managerEmpId, 
+      requestedBy,
+      ip: req.ip
+    }, 
+    'Manager fetching team employees'
+  );
+
   try {
     // Verify manager exists
-    const [[manager]] = await pool.query(
-      "SELECT empid, name FROM employees WHERE empid = ?",
-      [managerEmpId]
-    );
+    const [[manager]] = await pool.query(SELECT_EMPLOYEE_NAME, [managerEmpId]);
 
     if (!manager) {
+      logger.warn({ route: '/managers/:managerEmpId/employees', method: 'GET', managerEmpId, requestedBy }, 'Manager not found');
       throw new ApiError("Manager not found", 404);
     }
 
@@ -41,6 +54,17 @@ router.get("/:managerEmpId/employees", async (req, res, next) => {
       [managerEmpId]
     );
 
+    logger.debug(
+      { 
+        route: '/managers/:managerEmpId/employees', 
+        method: 'GET',
+        managerEmpId, 
+        requestedBy,
+        employeesCount: employees.length
+      }, 
+      'Team employees retrieved successfully'
+    );
+
     res.json({
       manager_id: managerEmpId,
       manager_name: manager.name,
@@ -48,6 +72,18 @@ router.get("/:managerEmpId/employees", async (req, res, next) => {
       count: employees.length,
     });
   } catch (error) {
+    logger.error(
+      { 
+        route: '/managers/:managerEmpId/employees', 
+        method: 'GET',
+        managerEmpId, 
+        requestedBy,
+        error: error.message,
+        stack: error.stack,
+        ip: req.ip
+      }, 
+      'Error fetching team employees'
+    );
     next(error);
   }
 });
@@ -55,20 +91,31 @@ router.get("/:managerEmpId/employees", async (req, res, next) => {
 /**
  * GET /managers/:managerEmpId/dashboard
  * Get team dashboard overview with summary statistics
- * Includes: team count, present/absent today, pending leaves, upcoming birthdays/anniversaries
+ * Includes: team count, present/absent today, pending leaves, pending attendance corrections, upcoming birthdays/anniversaries
  */
 router.get("/:managerEmpId/dashboard", async (req, res, next) => {
   const managerEmpId = req.params.managerEmpId;
   const { date } = req.query; // Optional date, defaults to today
+  const requestedBy = req.user?.empid || 'unknown';
+
+  logger.info(
+    { 
+      route: '/managers/:managerEmpId/dashboard', 
+      method: 'GET',
+      managerEmpId, 
+      requestedBy,
+      date,
+      ip: req.ip
+    }, 
+    'Manager fetching dashboard'
+  );
 
   try {
     // Verify manager exists
-    const [[manager]] = await pool.query(
-      "SELECT empid, name FROM employees WHERE empid = ?",
-      [managerEmpId]
-    );
+    const [[manager]] = await pool.query(SELECT_EMPLOYEE_NAME, [managerEmpId]);
 
     if (!manager) {
+      logger.warn({ route: '/managers/:managerEmpId/dashboard', method: 'GET', managerEmpId, requestedBy }, 'Manager not found');
       throw new ApiError("Manager not found", 404);
     }
 
@@ -89,6 +136,7 @@ router.get("/:managerEmpId/dashboard", async (req, res, next) => {
       on_leave_today: 0,
       late_today: 0,
       pending_leave_requests: 0,
+      pending_attendance_correction_requests: 0,
       upcoming_birthdays: [],
       upcoming_anniversaries: [],
     };
@@ -99,6 +147,7 @@ router.get("/:managerEmpId/dashboard", async (req, res, next) => {
         manager_name: manager.name,
         date: today,
         summary,
+        pending_attendance_corrections: [],
       });
     }
 
@@ -141,6 +190,31 @@ router.get("/:managerEmpId/dashboard", async (req, res, next) => {
     );
 
     summary.pending_leave_requests = pendingLeaves[0]?.count || 0;
+
+    // Get pending attendance correction requests
+    const [pendingCorrections] = await pool.query(
+      `SELECT 
+        acr.id,
+        acr.empid,
+        acr.attendance_record_id,
+        DATE_FORMAT(acr.correction_date, '%Y-%m-%d') as correction_date,
+        DATE_FORMAT(acr.requested_check_in, '%Y-%m-%d %H:%i:%s') as requested_check_in,
+        DATE_FORMAT(acr.requested_check_out, '%Y-%m-%d %H:%i:%s') as requested_check_out,
+        acr.reason,
+        DATE_FORMAT(acr.applied_at, '%Y-%m-%d') as applied_at,
+        e.name as employee_name,
+        e.email as employee_email,
+        d.name as department_name
+      FROM attendance_correction_requests acr
+      LEFT JOIN employees e ON acr.empid = e.empid
+      LEFT JOIN departments d ON e.department_id = d.deptid
+      WHERE acr.empid IN (?)
+        AND acr.status = 'PENDING'
+      ORDER BY acr.applied_at DESC`,
+      [teamMemberEmpids]
+    );
+
+    summary.pending_attendance_correction_requests = pendingCorrections.length;
 
     // Get upcoming birthdays (next 30 days)
     const [birthdays] = await pool.query(
@@ -212,11 +286,24 @@ router.get("/:managerEmpId/dashboard", async (req, res, next) => {
     const attendanceRate =
       totalRecords > 0 ? ((stats.present_count || 0) / totalRecords) * 100 : 0;
 
+    logger.debug(
+      { 
+        route: '/managers/:managerEmpId/dashboard', 
+        method: 'GET',
+        managerEmpId, 
+        requestedBy,
+        date: today,
+        teamSize: summary.total_team_members
+      }, 
+      'Dashboard retrieved successfully'
+    );
+
     res.json({
       manager_empid: managerEmpId,
       manager_name: manager.name,
       date: today,
       summary,
+      pending_attendance_corrections: pendingCorrections,
       attendance_rate_30_days: Math.round(attendanceRate * 100) / 100,
       attendance_stats_30_days: {
         present: stats.present_count || 0,
@@ -226,6 +313,18 @@ router.get("/:managerEmpId/dashboard", async (req, res, next) => {
       },
     });
   } catch (error) {
+    logger.error(
+      { 
+        route: '/managers/:managerEmpId/dashboard', 
+        method: 'GET',
+        managerEmpId, 
+        requestedBy,
+        error: error.message,
+        stack: error.stack,
+        ip: req.ip
+      }, 
+      'Error fetching dashboard'
+    );
     next(error);
   }
 });

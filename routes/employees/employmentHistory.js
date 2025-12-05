@@ -2,30 +2,31 @@ const express = require("express");
 const router = express.Router({ mergeParams: true });
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
+const { SELECT_EMPLOYEE_EXISTS } = require("../../queries/employees");
 
 // Get employment history for an employee
-router.get("/employees/:empid/employment-history", async (req, res, next) => {
+router.get("/:empid/employment-history", async (req, res, next) => {
   try {
     const empid = req.params.empid;
 
     // Check if employee exists
-    const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
-      [empid]
-    );
+    const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
     if (!employee) {
       throw new ApiError("Employee not found", 404);
     }
 
     const [rows] = await pool.query(
       `SELECT 
-        eh.*,
-        v.name as verified_by_name,
-        v.email as verified_by_email
-      FROM employee_employment_history eh
-      LEFT JOIN employees v ON eh.verified_by = v.empid
-      WHERE eh.empid = ? 
-      ORDER BY eh.start_date DESC`,
+        id, empid, company_name, designation, 
+        DATE_FORMAT(start_date, '%Y-%m-%d') as start_date, 
+        DATE_FORMAT(end_date, '%Y-%m-%d') as end_date, 
+        job_description, reason_for_leaving, last_salary, 
+        supervisor_name, supervisor_contact, 
+        is_verified, verified_by, 
+        DATE_FORMAT(verified_at, '%Y-%m-%d %H:%i:%s') as verified_at
+      FROM employee_employment_history
+      WHERE empid = ? 
+      ORDER BY start_date DESC`,
       [empid]
     );
     res.json({ history: rows });
@@ -35,7 +36,7 @@ router.get("/employees/:empid/employment-history", async (req, res, next) => {
 });
 
 // Create employment history record
-router.post("/employees/:empid/employment-history", async (req, res, next) => {
+router.post("/:empid/employment-history", async (req, res, next) => {
   const {
     company_name,
     designation,
@@ -51,16 +52,16 @@ router.post("/employees/:empid/employment-history", async (req, res, next) => {
 
   try {
     // Check if employee exists
-    const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
-      [empid]
-    );
+    const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
     if (!employee) {
       throw new ApiError("Employee not found", 404);
     }
 
     if (!company_name || !designation || !start_date) {
-      throw new ApiError("company_name, designation, and start_date are required", 400);
+      throw new ApiError(
+        "company_name, designation, and start_date are required",
+        400
+      );
     }
 
     const [result] = await pool.query(
@@ -88,7 +89,7 @@ router.post("/employees/:empid/employment-history", async (req, res, next) => {
 });
 
 // Update employment history record
-router.patch("/employees/:empid/employment-history/:id", async (req, res, next) => {
+router.patch("/:empid/employment-history/:id", async (req, res, next) => {
   const {
     company_name,
     designation,
@@ -107,10 +108,7 @@ router.patch("/employees/:empid/employment-history/:id", async (req, res, next) 
 
   try {
     // Check if employee exists
-    const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
-      [empid]
-    );
+    const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
     if (!employee) {
       throw new ApiError("Employee not found", 404);
     }
@@ -173,10 +171,9 @@ router.patch("/employees/:empid/employment-history/:id", async (req, res, next) 
         updates.push("verified_by = NULL, verified_at = NULL");
       } else {
         // Validate verifier exists
-        const [[verifier]] = await pool.query(
-          "SELECT empid FROM employees WHERE empid = ?",
-          [verified_by]
-        );
+        const [[verifier]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [
+          verified_by,
+        ]);
         if (!verifier) {
           throw new ApiError("Verifier employee not found", 404);
         }
@@ -201,16 +198,13 @@ router.patch("/employees/:empid/employment-history/:id", async (req, res, next) 
 });
 
 // Delete employment history record
-router.delete("/employees/:empid/employment-history/:id", async (req, res, next) => {
+router.delete("/:empid/employment-history/:id", async (req, res, next) => {
   try {
     const empid = req.params.empid;
     const id = req.params.id;
 
     // Check if employee exists
-    const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
-      [empid]
-    );
+    const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
     if (!employee) {
       throw new ApiError("Employee not found", 404);
     }

@@ -4,7 +4,10 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Employee = require("../../models/Employee");
+const {
+  withCache,
+  CACHE_PREFIXES,
+} = require("../../util/cacheUtil");
 
 /**
  * GET /employees/search
@@ -29,130 +32,147 @@ router.get("/search", async (req, res, next) => {
   } = req.query;
 
   try {
-    let whereClauses = [];
-    let params = [];
-    const isFuzzy = fuzzy === "true" || fuzzy === true;
+    // Build cache key from all query parameters
+    const cacheKeyParts = [
+      CACHE_PREFIXES.EMPLOYEE,
+      'search',
+      search_type || 'all',
+      search_value || 'all',
+      fuzzy || 'true',
+      name_starts_with || 'all',
+      page || '1',
+      limit || '100',
+    ];
+    const cacheKey = cacheKeyParts.join(':');
 
-    // Handle name_starts_with filter (case-insensitive)
-    if (name_starts_with) {
-      const letter = name_starts_with.toUpperCase().charAt(0);
-      if (letter.match(/[A-Z]/)) {
-        whereClauses.push("UPPER(SUBSTRING(e.name, 1, 1)) = ?");
-        params.push(letter);
-      }
-    }
+    const result = await withCache(
+      async () => {
+        let whereClauses = [];
+        let params = [];
+        const isFuzzy = fuzzy === "true" || fuzzy === true;
 
-    // Handle search_type and search_value
-    if (search_type && search_value) {
-      switch (search_type.toLowerCase()) {
-        case "empid":
-          if (isFuzzy) {
-            // Fuzzy search: partial match on empid
-            whereClauses.push("e.empid LIKE ?");
-            params.push(`%${search_value}%`);
-          } else {
-            // Exact match
-            whereClauses.push("e.empid = ?");
-            params.push(search_value);
+        // Handle name_starts_with filter (case-insensitive)
+        if (name_starts_with) {
+          const letter = name_starts_with.toUpperCase().charAt(0);
+          if (letter.match(/[A-Z]/)) {
+            whereClauses.push("UPPER(SUBSTRING(e.name, 1, 1)) = ?");
+            params.push(letter);
           }
-          break;
+        }
 
-        case "name":
-          if (isFuzzy) {
-            // Fuzzy search: partial match on name (case-insensitive)
-            whereClauses.push("LOWER(e.name) LIKE ?");
-            params.push(`%${search_value.toLowerCase()}%`);
-          } else {
-            // Exact match (case-insensitive)
-            whereClauses.push("LOWER(e.name) = ?");
-            params.push(search_value.toLowerCase());
+        // Handle search_type and search_value
+        if (search_type && search_value) {
+          switch (search_type.toLowerCase()) {
+            case "empid":
+              if (isFuzzy) {
+                // Fuzzy search: partial match on empid
+                whereClauses.push("e.empid LIKE ?");
+                params.push(`%${search_value}%`);
+              } else {
+                // Exact match
+                whereClauses.push("e.empid = ?");
+                params.push(search_value);
+              }
+              break;
+
+            case "name":
+              if (isFuzzy) {
+                // Fuzzy search: partial match on name (case-insensitive)
+                whereClauses.push("LOWER(e.name) LIKE ?");
+                params.push(`%${search_value.toLowerCase()}%`);
+              } else {
+                // Exact match (case-insensitive)
+                whereClauses.push("LOWER(e.name) = ?");
+                params.push(search_value.toLowerCase());
+              }
+              break;
+
+            case "department":
+              // Exact match on department_id
+              whereClauses.push("e.department_id = ?");
+              params.push(search_value);
+              break;
+
+            case "location":
+              // Exact match on location_id
+              whereClauses.push("e.location_id = ?");
+              params.push(parseInt(search_value));
+              break;
+
+            default:
+              throw new ApiError(
+                `Invalid search_type. Must be one of: empid, name, department, location`,
+                400
+              );
           }
-          break;
+        }
 
-        case "department":
-          // Exact match on department_id
-          whereClauses.push("e.department_id = ?");
-          params.push(search_value);
-          break;
+        const whereSql = whereClauses.length
+          ? `WHERE ${whereClauses.join(" AND ")}`
+          : "";
 
-        case "location":
-          // Exact match on location_id
-          whereClauses.push("e.location_id = ?");
-          params.push(parseInt(search_value));
-          break;
+        // Pagination
+        const pageNum = parseInt(page) || 1;
+        const limitNum = parseInt(limit) || 100;
+        const offset = (pageNum - 1) * limitNum;
 
-        default:
-          throw new ApiError(
-            `Invalid search_type. Must be one of: empid, name, department, location`,
-            400
-          );
-      }
-    }
+        // Get total count for pagination
+        const [countResult] = await pool.query(
+          `SELECT COUNT(*) as total 
+           FROM employees e 
+           ${whereSql}`,
+          params
+        );
+        const total = countResult[0]?.total || 0;
 
-    const whereSql = whereClauses.length
-      ? `WHERE ${whereClauses.join(" AND ")}`
-      : "";
+        // Get employees with job information for is_active status
+        const query = `
+          SELECT 
+            e.empid,
+            e.name,
+            e.email,
+            DATE_FORMAT(e.doj, '%Y-%m-%d') as doj,
+            e.manager_id,
+            e.hr_manager_id,
+            e.department_id,
+            e.location_id,
+            ji.employment_status
+          FROM employees e
+          LEFT JOIN employee_job_information ji ON e.empid = ji.empid
+          ${whereSql}
+          ORDER BY e.name ASC, e.empid ASC
+          LIMIT ? OFFSET ?
+        `;
 
-    // Pagination
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 100;
-    const offset = (pageNum - 1) * limitNum;
+        const [employees] = await pool.query(query, [...params, limitNum, offset]);
 
-    // Get total count for pagination
-    const [countResult] = await pool.query(
-      `SELECT COUNT(*) as total 
-       FROM employees e 
-       ${whereSql}`,
-      params
+        // Add is_active field to each employee
+        const formattedEmployees = employees.map((emp) => {
+          // Determine is_active from employment_status
+          const employmentStatus = emp?.employment_status || "active";
+          const is_active =
+            employmentStatus === "active" || employmentStatus === "on_leave"
+              ? "Y"
+              : "N";
+
+          return {
+            ...emp,
+            is_active: is_active,
+          };
+        });
+
+        return {
+          employees: formattedEmployees,
+          total: total,
+          page: pageNum,
+          limit: limitNum,
+        };
+      },
+      cacheKey,
+      1800 // 30 minutes TTL (employee search results change less frequently)
     );
-    const total = countResult[0]?.total || 0;
 
-    // Get employees with job information for is_active status
-    const query = `
-      SELECT 
-        e.empid,
-        e.name,
-        e.email,
-        DATE_FORMAT(e.doj, '%Y-%m-%d') as doj,
-        e.manager_id,
-        e.hr_manager_id,
-        e.department_id,
-        e.location_id,
-        ji.employment_status
-      FROM employees e
-      LEFT JOIN employee_job_information ji ON e.empid = ji.empid
-      ${whereSql}
-      ORDER BY e.name ASC, e.empid ASC
-      LIMIT ? OFFSET ?
-    `;
-
-    const [employees] = await pool.query(query, [...params, limitNum, offset]);
-
-    // Convert to Employee class instances
-    const employeeInstances = Employee.fromDatabaseRows(employees);
-
-    // Add is_active field to each employee (not part of Employee class)
-    const formattedEmployees = employeeInstances.map((emp, index) => {
-      const empData = emp.toJSON();
-      // Determine is_active from employment_status
-      const employmentStatus = employees[index]?.employment_status || "active";
-      const is_active =
-        employmentStatus === "active" || employmentStatus === "on_leave"
-          ? "Y"
-          : "N";
-
-      return {
-        ...empData,
-        is_active: is_active,
-      };
-    });
-
-    res.json({
-      employees: formattedEmployees,
-      total: total,
-      page: pageNum,
-      limit: limitNum,
-    });
+    res.json(result);
   } catch (error) {
     next(error);
   }

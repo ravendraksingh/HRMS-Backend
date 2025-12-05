@@ -11,8 +11,11 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+const compression = require("compression");
 const pool = require("./db");
-
+const { format } = require("date-fns");
+const { connectRedis, disconnectRedis } = require("./util/redisClient");
+const { prefillCache } = require("./util/prefillCache");
 // ============================================================================
 // 2. Application Setup
 // ============================================================================
@@ -42,13 +45,37 @@ app.use(
 
 // HTTP request logger (disabled by default)
 // Uncomment to enable:
-// const morgan = require("morgan");
-// app.use(morgan("combined"));
+const morgan = require("morgan");
+// app.use(morgan(":date :method :url :status :response-time ms"));
+// app.use(morgan("dev"));
+app.use(morgan(':date[web] :method :url :status :response-time ms'));
+morgan.token("date", (req, res) => {
+  return format(new Date(), "yyyy-MM-dd HH:mm:ss");
+});
 
 // Request payload logger (disabled by default)
 // Uncomment to enable:
 // const { requestLogger } = require("./middlewares/requestLogger");
 // app.use(requestLogger);
+
+// Compression middleware for large payload routes
+// Configure compression for calendar and attendance routes
+const compress = compression({
+  threshold: 1024, // Only compress responses > 1KB
+  level: 6, // Balance between compression ratio and CPU usage
+  filter: (req, res) => {
+    // Don't compress if client doesn't support it
+    if (req.headers['x-no-compression']) {
+      return false;
+    }
+    // Use default compression filter
+    return compression.filter(req, res);
+  }
+});
+
+// Apply compression to specific calendar routes
+app.use('/employees/:empid/calendar', compress);
+app.use('/employees/:empid/calendar/attendance/monthly', compress);
 
 // ============================================================================
 // 4. Route Imports (Organized by Category)
@@ -242,6 +269,18 @@ async function startServer(requireDb = true) {
       console.log("✅ Database connection established");
     }
 
+    // Connect to Redis (non-blocking)
+    await connectRedis();
+
+    // Pre-fill cache with frequently accessed, rarely changing data
+    if (dbConnected) {
+      try {
+        await prefillCache();
+      } catch (error) {
+        console.warn("⚠️  Cache pre-fill failed, but continuing server startup:", error.message);
+      }
+    }
+
     // Start HTTP server
     const server = app.listen(PORT, () => {
       console.log(`🚀 Server listening on port ${PORT}`);
@@ -275,8 +314,11 @@ function setupGracefulShutdown(server) {
     console.log(`\n${signal} received. Starting graceful shutdown...`);
 
     // Stop accepting new requests
-    server.close(() => {
+    server.close(async () => {
       console.log("✅ HTTP server closed");
+
+      // Close Redis connection
+      await disconnectRedis();
 
       // Close database pool
       pool.end((err) => {

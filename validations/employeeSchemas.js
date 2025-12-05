@@ -27,6 +27,52 @@ const empidParamValidator = param("empid")
   .trim();
 
 // ============================================
+// EMPLOYEE VALIDATION SCHEMAS
+// ============================================
+
+/**
+ * Schema for creating an employee
+ */
+const createEmployeeSchema = [
+  empidValidator("empid")
+    .isLength({ max: 10 })
+    .withMessage("empid must be 10 characters or less")
+    .toUpperCase(),
+  body("name")
+    .notEmpty()
+    .withMessage("name is required")
+    .isLength({ max: 150 })
+    .withMessage("name must be 150 characters or less")
+    .trim(),
+  emailValidator("email", true), // Required
+  dateValidator("doj", false), // Optional
+  body("manager_id")
+    .optional()
+    .isLength({ max: 10 })
+    .withMessage("manager_id must be 10 characters or less")
+    .trim()
+    .toUpperCase(),
+  body("hr_manager_id")
+    .optional()
+    .isLength({ max: 10 })
+    .withMessage("hr_manager_id must be 10 characters or less")
+    .trim()
+    .toUpperCase(),
+  body("department_id")
+    .optional()
+    .isLength({ max: 10 })
+    .withMessage("department_id must be 10 characters or less")
+    .trim()
+    .toUpperCase(),
+  integerIdValidator("location_id", false), // Optional
+];
+
+/**
+ * Schema for getting/updating/deleting an employee by ID
+ */
+const empidParamSchema = [empidParamValidator];
+
+// ============================================
 // EMPLOYEE PERSONAL DETAILS VALIDATION SCHEMAS
 // ============================================
 
@@ -65,13 +111,13 @@ const updatePersonalDetailsSchema = [
   body("current_postal_code").optional().trim(),
   body("current_country").optional().trim(),
   body("pan_number")
-    .optional()
+    .optional({ checkFalsy: true })
     .matches(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/)
     .withMessage("pan_number must be in format ABCDE1234F")
     .trim()
     .toUpperCase(),
   body("aadhaar_number")
-    .optional()
+    .optional({ checkFalsy: true })
     .matches(/^[0-9]{12}$/)
     .withMessage("aadhaar_number must be 12 digits")
     .trim(),
@@ -242,9 +288,10 @@ const updateEducationSchema = [
   body("grade").optional().trim(),
   body("is_verified")
     .optional()
-    .isBoolean()
-    .withMessage("is_verified must be a boolean")
-    .toBoolean(),
+    .default("N")
+    .isIn(["Y", "N"])
+    .withMessage("is_verified must be Y or N")
+    .trim(),
   body("verified_by").optional().trim(),
 ];
 
@@ -272,12 +319,12 @@ const createFamilySchema = [
   phoneValidator("phone", false),
   emailValidator("email", false),
   body("aadhaar_number")
-    .optional()
+    .optional({ checkFalsy: true })
     .matches(/^[0-9]{12}$/)
     .withMessage("aadhaar_number must be 12 digits")
     .trim(),
   body("pan_number")
-    .optional()
+    .optional({ checkFalsy: true })
     .matches(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/)
     .withMessage("pan_number must be in format ABCDE1234F")
     .trim()
@@ -321,12 +368,12 @@ const updateFamilySchema = [
   phoneValidator("phone", false),
   emailValidator("email", false),
   body("aadhaar_number")
-    .optional()
+    .optional({ checkFalsy: true })
     .matches(/^[0-9]{12}$/)
     .withMessage("aadhaar_number must be 12 digits")
     .trim(),
   body("pan_number")
-    .optional()
+    .optional({ checkFalsy: true })
     .matches(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/)
     .withMessage("pan_number must be in format ABCDE1234F")
     .trim()
@@ -350,6 +397,10 @@ module.exports = {
   empidValidator,
   empidParamValidator,
 
+  // Employee schemas
+  createEmployeeSchema,
+  empidParamSchema,
+
   // Employee personal details schemas
   updatePersonalDetailsSchema,
 
@@ -365,4 +416,3 @@ module.exports = {
   createFamilySchema,
   updateFamilySchema,
 };
-

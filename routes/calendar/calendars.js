@@ -4,12 +4,19 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
+const mysql = require("mysql2/promise");
 const ApiError = require("../../errors/ApiError");
 const {
   getMonthlyCalendarForLevel,
   getCalendarForLevel,
   getFinancialYear,
 } = require("../../util/calendarUtil");
+const { requireHRManagerOrAdmin } = require("../../middlewares/rbac");
+const {
+  withCache,
+  invalidateCalendarCache,
+  CACHE_PREFIXES,
+} = require("../../util/cacheUtil");
 
 /**
  * GET /calendars/monthly/organization
@@ -51,40 +58,54 @@ router.get("/monthly/organization", async (req, res, next) => {
       throw new ApiError("year must be between 2000 and 2100", 400);
     }
 
-    // Convert year and month to financial year (YYYY-YY format)
-    // Use the first day of the month to determine financial year
-    const dateForFinancialYear = `${year}-${String(monthNum).padStart(2, "0")}-01`;
-    const financialYear = getFinancialYear(dateForFinancialYear);
+    // Build cache key
+    const cacheKey = `${CACHE_PREFIXES.CALENDAR}:monthly:organization:${month}`;
 
-    const calendar = await getCalendarForLevel(
-      "ORGANIZATION",
-      financialYear,
-      null,
-      null,
-      null
+    const result = await withCache(
+      async () => {
+        // Convert year and month to financial year (YYYY-YY format)
+        // Use the first day of the month to determine financial year
+        const dateForFinancialYear = `${year}-${String(monthNum).padStart(
+          2,
+          "0"
+        )}-01`;
+        const financialYear = getFinancialYear(dateForFinancialYear);
+
+        const calendar = await getCalendarForLevel(
+          "ORGANIZATION",
+          financialYear,
+          null,
+          null,
+          null
+        );
+
+        if (!calendar) {
+          throw new ApiError(
+            `Organization calendar not found for financial year ${financialYear}`,
+            404
+          );
+        }
+
+        const monthlyCalendar = getMonthlyCalendarForLevel(
+          calendar,
+          year,
+          monthNum
+        );
+
+        return {
+          message: "Organization monthly calendar retrieved successfully",
+          month: month,
+          year: year,
+          month_number: monthNum,
+          calendar_name: calendar.calendar_name,
+          ...monthlyCalendar,
+        };
+      },
+      cacheKey,
+      1800 // 30 minutes TTL (calendar data changes less frequently)
     );
 
-    if (!calendar) {
-      throw new ApiError(
-        `Organization calendar not found for financial year ${financialYear}`,
-        404
-      );
-    }
-
-    const monthlyCalendar = getMonthlyCalendarForLevel(
-      calendar,
-      year,
-      monthNum
-    );
-
-    res.json({
-      message: "Organization monthly calendar retrieved successfully",
-      month: month,
-      year: year,
-      month_number: monthNum,
-      calendar_name: calendar.calendar_name,
-      ...monthlyCalendar,
-    });
+    res.json(result);
   } catch (error) {
     next(error);
   }
@@ -131,41 +152,55 @@ router.get("/monthly/location/:location_id", async (req, res, next) => {
       throw new ApiError("year must be between 2000 and 2100", 400);
     }
 
-    // Convert year and month to financial year (YYYY-YY format)
-    // Use the first day of the month to determine financial year
-    const dateForFinancialYear = `${year}-${String(monthNum).padStart(2, "0")}-01`;
-    const financialYear = getFinancialYear(dateForFinancialYear);
+    // Build cache key
+    const cacheKey = `${CACHE_PREFIXES.CALENDAR}:monthly:location:${location_id}:${month}`;
 
-    const calendar = await getCalendarForLevel(
-      "LOCATION",
-      financialYear,
-      parseInt(location_id),
-      null,
-      null
+    const result = await withCache(
+      async () => {
+        // Convert year and month to financial year (YYYY-YY format)
+        // Use the first day of the month to determine financial year
+        const dateForFinancialYear = `${year}-${String(monthNum).padStart(
+          2,
+          "0"
+        )}-01`;
+        const financialYear = getFinancialYear(dateForFinancialYear);
+
+        const calendar = await getCalendarForLevel(
+          "LOCATION",
+          financialYear,
+          parseInt(location_id),
+          null,
+          null
+        );
+
+        if (!calendar) {
+          throw new ApiError(
+            `Location calendar not found for location_id ${location_id} and financial year ${financialYear}`,
+            404
+          );
+        }
+
+        const monthlyCalendar = getMonthlyCalendarForLevel(
+          calendar,
+          year,
+          monthNum
+        );
+
+        return {
+          message: "Location monthly calendar retrieved successfully",
+          location_id: parseInt(location_id),
+          month: month,
+          year: year,
+          month_number: monthNum,
+          calendar_name: calendar.calendar_name,
+          ...monthlyCalendar,
+        };
+      },
+      cacheKey,
+      1800 // 30 minutes TTL
     );
 
-    if (!calendar) {
-      throw new ApiError(
-        `Location calendar not found for location_id ${location_id} and financial year ${financialYear}`,
-        404
-      );
-    }
-
-    const monthlyCalendar = getMonthlyCalendarForLevel(
-      calendar,
-      year,
-      monthNum
-    );
-
-    res.json({
-      message: "Location monthly calendar retrieved successfully",
-      location_id: parseInt(location_id),
-      month: month,
-      year: year,
-      month_number: monthNum,
-      calendar_name: calendar.calendar_name,
-      ...monthlyCalendar,
-    });
+    res.json(result);
   } catch (error) {
     next(error);
   }
@@ -212,41 +247,55 @@ router.get("/monthly/department/:department_id", async (req, res, next) => {
       throw new ApiError("year must be between 2000 and 2100", 400);
     }
 
-    // Convert year and month to financial year (YYYY-YY format)
-    // Use the first day of the month to determine financial year
-    const dateForFinancialYear = `${year}-${String(monthNum).padStart(2, "0")}-01`;
-    const financialYear = getFinancialYear(dateForFinancialYear);
+    // Build cache key
+    const cacheKey = `${CACHE_PREFIXES.CALENDAR}:monthly:department:${department_id}:${month}`;
 
-    const calendar = await getCalendarForLevel(
-      "DEPARTMENT",
-      financialYear,
-      null,
-      department_id,
-      null
+    const result = await withCache(
+      async () => {
+        // Convert year and month to financial year (YYYY-YY format)
+        // Use the first day of the month to determine financial year
+        const dateForFinancialYear = `${year}-${String(monthNum).padStart(
+          2,
+          "0"
+        )}-01`;
+        const financialYear = getFinancialYear(dateForFinancialYear);
+
+        const calendar = await getCalendarForLevel(
+          "DEPARTMENT",
+          financialYear,
+          null,
+          department_id,
+          null
+        );
+
+        if (!calendar) {
+          throw new ApiError(
+            `Department calendar not found for department_id ${department_id} and financial year ${financialYear}`,
+            404
+          );
+        }
+
+        const monthlyCalendar = getMonthlyCalendarForLevel(
+          calendar,
+          year,
+          monthNum
+        );
+
+        return {
+          message: "Department monthly calendar retrieved successfully",
+          department_id,
+          month: month,
+          year: year,
+          month_number: monthNum,
+          calendar_name: calendar.calendar_name,
+          ...monthlyCalendar,
+        };
+      },
+      cacheKey,
+      1800 // 30 minutes TTL
     );
 
-    if (!calendar) {
-      throw new ApiError(
-        `Department calendar not found for department_id ${department_id} and financial year ${financialYear}`,
-        404
-      );
-    }
-
-    const monthlyCalendar = getMonthlyCalendarForLevel(
-      calendar,
-      year,
-      monthNum
-    );
-
-    res.json({
-      message: "Department monthly calendar retrieved successfully",
-      department_id,
-      month: month,
-      year: year,
-      month_number: monthNum,
-      calendar_name: calendar.calendar_name,
-      ...monthlyCalendar,
-    });
+    res.json(result);
   } catch (error) {
     next(error);
   }
@@ -281,51 +330,66 @@ router.get("/", async (req, res, next) => {
       );
     }
 
-    let whereClause = "calendar_type = ? AND is_active = 'Y'";
-    const params = [calendar_type];
+    // Build cache key based on all query parameters
+    const cacheKeyParts = [
+      CACHE_PREFIXES.CALENDAR,
+      'list',
+      calendar_type,
+      financial_year || 'all',
+      location_id || 'all',
+      department_id || 'all',
+      empid || 'all',
+    ];
+    const cacheKey = cacheKeyParts.join(':');
 
-    if (financial_year) {
-      whereClause += " AND financial_year = ?";
-      params.push(financial_year);
-    }
+    const calendars = await withCache(
+      async () => {
+        let whereClause = "calendar_type = ?";
+        const params = [calendar_type];
 
-    if (calendar_type === "ORGANIZATION") {
-      // No additional filter needed for organization (single org system)
-    } else if (calendar_type === "LOCATION" && location_id) {
-      whereClause += " AND location_id = ?";
-      params.push(parseInt(location_id));
-    } else if (calendar_type === "DEPARTMENT" && department_id) {
-      whereClause += " AND department_id = ?";
-      params.push(department_id);
-    } else if (calendar_type === "EMPLOYEE" && empid) {
-      whereClause += " AND empid = ?";
-      params.push(empid);
-    }
+        if (financial_year) {
+          whereClause += " AND financial_year = ?";
+          params.push(financial_year);
+        }
 
-    const [calendars] = await pool.query(
-      `SELECT 
-        id,
-        calendar_name,
-        calendar_type,
-        location_id,
-        department_id,
-        empid,
-        financial_year,
-        is_active,
-        description,
-        created_by,
-        created_at,
-        updated_at
-      FROM attendance_calendars
-      WHERE ${whereClause}
-      ORDER BY financial_year DESC, calendar_name ASC`,
-      params
+        if (calendar_type === "ORGANIZATION") {
+          // No additional filter needed for organization (single org system)
+        } else if (calendar_type === "LOCATION" && location_id) {
+          whereClause += " AND location_id = ?";
+          params.push(parseInt(location_id));
+        } else if (calendar_type === "DEPARTMENT" && department_id) {
+          whereClause += " AND department_id = ?";
+          params.push(department_id);
+        } else if (calendar_type === "EMPLOYEE" && empid) {
+          whereClause += " AND empid = ?";
+          params.push(empid);
+        }
+
+        const [rows] = await pool.query(
+          `SELECT 
+            id,
+            calendar_name,
+            calendar_type,
+            location_id,
+            department_id,
+            empid,
+            financial_year,
+            is_active,
+            description,
+            created_by
+          FROM attendance_calendars
+          WHERE ${whereClause}
+          ORDER BY financial_year DESC, calendar_name ASC`,
+          params
+        );
+
+        return rows;
+      },
+      cacheKey,
+      1800 // 30 minutes TTL
     );
 
-    res.json({
-      count: calendars.length,
-      calendars,
-    });
+    res.json(calendars);
   } catch (error) {
     next(error);
   }
@@ -539,6 +603,9 @@ router.post("/", async (req, res, next) => {
       [result.insertId]
     );
 
+    // Invalidate calendar caches
+    await invalidateCalendarCache(null, calendar_type, location_id, department_id);
+
     res.status(201).json({
       message: "Calendar created successfully",
       calendar: newCalendar,
@@ -552,46 +619,50 @@ router.post("/", async (req, res, next) => {
  * POST /calendars/:id/holidays
  * Add holidays to a calendar
  * Body: { holidays: [{ holiday_date, holiday_name, is_optional?, is_override?, description? }] }
+ * Requires HRMANAGER or ADMIN role
  */
-router.post("/:id/holidays", async (req, res, next) => {
-  const { id } = req.params;
-  const { holidays } = req.body;
-
-  try {
-    if (!holidays || !Array.isArray(holidays) || holidays.length === 0) {
-      throw new ApiError(
-        "holidays array is required and must not be empty",
-        400
-      );
-    }
-
-    // Check if calendar exists
-    const [[calendar]] = await pool.query(
-      "SELECT id FROM attendance_calendars WHERE id = ?",
-      [id]
-    );
-
-    if (!calendar) {
-      throw new ApiError("Calendar not found", 404);
-    }
-
-    // Insert holidays
-    const connection = await pool.getConnection();
-    await connection.beginTransaction();
+router.post(
+  "/:id/holidays",
+  requireHRManagerOrAdmin,
+  async (req, res, next) => {
+    const { id } = req.params;
+    const { holidays } = req.body;
 
     try {
-      const insertedHolidays = [];
+      if (!holidays || !Array.isArray(holidays) || holidays.length === 0) {
+        throw new ApiError(
+          "holidays array is required and must not be empty",
+          400
+        );
+      }
 
-      for (const holiday of holidays) {
-        if (!holiday.holiday_date || !holiday.holiday_name) {
-          throw new ApiError(
-            "Each holiday must have holiday_date and holiday_name",
-            400
-          );
-        }
+      // Check if calendar exists
+      const [[calendar]] = await pool.query(
+        "SELECT id FROM attendance_calendars WHERE id = ?",
+        [id]
+      );
 
-        const [result] = await connection.query(
-          `INSERT INTO attendance_calendar_holidays (
+      if (!calendar) {
+        throw new ApiError("Calendar not found", 404);
+      }
+
+      // Insert holidays
+      const connection = await pool.getConnection();
+      await connection.beginTransaction();
+
+      try {
+        const insertedHolidays = [];
+
+        for (const holiday of holidays) {
+          if (!holiday.holiday_date || !holiday.holiday_name) {
+            throw new ApiError(
+              "Each holiday must have holiday_date and holiday_name",
+              400
+            );
+          }
+
+          const [result] = await connection.query(
+            `INSERT INTO attendance_calendar_holidays (
             calendar_id, holiday_date, holiday_name, is_optional, is_override, description
           ) VALUES (?, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
@@ -600,38 +671,55 @@ router.post("/:id/holidays", async (req, res, next) => {
             is_override = VALUES(is_override),
             description = VALUES(description),
             updated_at = NOW()`,
-          [
-            id,
-            holiday.holiday_date,
-            holiday.holiday_name,
-            (holiday.is_optional || "N").toUpperCase(),
-            (holiday.is_override || "N").toUpperCase(),
-            holiday.description || null,
-          ]
+            [
+              id,
+              holiday.holiday_date,
+              holiday.holiday_name,
+              (holiday.is_optional || "N").toUpperCase(),
+              (holiday.is_override || "N").toUpperCase(),
+              holiday.description || null,
+            ]
+          );
+
+          insertedHolidays.push({
+            holiday_date: holiday.holiday_date,
+            holiday_name: holiday.holiday_name,
+          });
+        }
+
+        await connection.commit();
+
+        // Get calendar details for cache invalidation
+        const [[calendarInfo]] = await pool.query(
+          "SELECT calendar_type, location_id, department_id FROM attendance_calendars WHERE id = ?",
+          [id]
         );
 
-        insertedHolidays.push({
-          holiday_date: holiday.holiday_date,
-          holiday_name: holiday.holiday_name,
+        // Invalidate calendar caches
+        if (calendarInfo) {
+          await invalidateCalendarCache(
+            id,
+            calendarInfo.calendar_type,
+            calendarInfo.location_id,
+            calendarInfo.department_id
+          );
+        }
+
+        res.status(201).json({
+          message: "Holidays added successfully",
+          holidays: insertedHolidays,
         });
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
       }
-
-      await connection.commit();
-
-      res.status(201).json({
-        message: "Holidays added successfully",
-        holidays: insertedHolidays,
-      });
     } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
+      next(error);
     }
-  } catch (error) {
-    next(error);
   }
-});
+);
 
 /**
  * POST /calendars/:id/weekly-offs
@@ -699,6 +787,22 @@ router.post("/:id/weekly-offs", async (req, res, next) => {
       }
 
       await connection.commit();
+
+      // Get calendar details for cache invalidation
+      const [[calendarInfo]] = await pool.query(
+        "SELECT calendar_type, location_id, department_id FROM attendance_calendars WHERE id = ?",
+        [id]
+      );
+
+      // Invalidate calendar caches
+      if (calendarInfo) {
+        await invalidateCalendarCache(
+          id,
+          calendarInfo.calendar_type,
+          calendarInfo.location_id,
+          calendarInfo.department_id
+        );
+      }
 
       res.status(201).json({
         message: "Weekly offs added successfully",
@@ -788,6 +892,14 @@ router.patch("/:id", async (req, res, next) => {
       [id]
     );
 
+    // Invalidate calendar caches
+    await invalidateCalendarCache(
+      id,
+      updatedCalendar.calendar_type,
+      updatedCalendar.location_id,
+      updatedCalendar.department_id
+    );
+
     res.json({
       message: "Calendar updated successfully",
       calendar: updatedCalendar,
@@ -815,7 +927,23 @@ router.delete("/:id", async (req, res, next) => {
       throw new ApiError("Calendar not found", 404);
     }
 
+    // Get calendar details before deletion for cache invalidation
+    const [[calendarInfo]] = await pool.query(
+      "SELECT calendar_type, location_id, department_id FROM attendance_calendars WHERE id = ?",
+      [id]
+    );
+
     await pool.query("DELETE FROM attendance_calendars WHERE id = ?", [id]);
+
+    // Invalidate calendar caches
+    if (calendarInfo) {
+      await invalidateCalendarCache(
+        id,
+        calendarInfo.calendar_type,
+        calendarInfo.location_id,
+        calendarInfo.department_id
+      );
+    }
 
     res.json({ message: "Calendar deleted successfully" });
   } catch (error) {

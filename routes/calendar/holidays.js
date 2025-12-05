@@ -2,7 +2,12 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Holiday = require("../../models/Holiday");
+const {
+  withCache,
+  invalidateHolidayCache,
+  invalidateCalendarCache,
+  CACHE_PREFIXES,
+} = require("../../util/cacheUtil");
 
 /**
  * GET /holidays
@@ -16,48 +21,57 @@ router.get("/", async (req, res, next) => {
       throw new ApiError("calendar_id query parameter is required", 400);
     }
 
-    // Verify calendar exists
-    const [[calendar]] = await pool.query(
-      "SELECT id FROM attendance_calendars WHERE id = ?",
-      [calendar_id]
+    // Build cache key
+    const yearKey = year ? `:year:${year}` : "";
+    const cacheKey = `${CACHE_PREFIXES.HOLIDAY}:calendar:${calendar_id}${yearKey}`;
+
+    const result = await withCache(
+      async () => {
+        // Verify calendar exists
+        const [[calendar]] = await pool.query(
+          "SELECT id FROM attendance_calendars WHERE id = ?",
+          [calendar_id]
+        );
+
+        if (!calendar) {
+          throw new ApiError("Calendar not found", 404);
+        }
+
+        let whereClauses = ["h.calendar_id = ?"];
+        let params = [calendar_id];
+
+        if (year) {
+          whereClauses.push("YEAR(h.holiday_date) = ?");
+          params.push(year);
+        }
+
+        const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
+
+        const [holidaysRows] = await pool.query(
+          `SELECT 
+            h.id,
+            h.holiday_name as name,
+            DATE_FORMAT(h.holiday_date, '%Y-%m-%d') as holiday_date,
+            h.is_optional,
+            h.is_override,
+            h.description,
+            h.calendar_id
+          FROM attendance_calendar_holidays h
+          ${whereSql} 
+          ORDER BY h.holiday_date ASC`,
+          params
+        );
+
+        return {
+          count: holidaysRows.length,
+          holidays: holidaysRows,
+        };
+      },
+      cacheKey,
+      3600 // 1 hour TTL
     );
 
-    if (!calendar) {
-      throw new ApiError("Calendar not found", 404);
-    }
-
-    let whereClauses = ["h.calendar_id = ?"];
-    let params = [calendar_id];
-
-    if (year) {
-      whereClauses.push("YEAR(h.holiday_date) = ?");
-      params.push(year);
-    }
-
-    const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
-
-    const [holidaysRows] = await pool.query(
-      `SELECT 
-        h.id,
-        h.holiday_name as name,
-        DATE_FORMAT(h.holiday_date, '%Y-%m-%d') as holiday_date,
-        h.is_optional,
-        h.is_override,
-        h.description,
-        h.calendar_id
-      FROM attendance_calendar_holidays h
-      ${whereSql} 
-      ORDER BY h.holiday_date ASC`,
-      params
-    );
-
-    // Convert database rows to Holiday class instances
-    const holidays = Holiday.fromDatabaseRows(holidaysRows);
-
-    res.json({
-      count: holidays.length,
-      holidays: holidays.map((holiday) => holiday.toJSON()),
-    });
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -87,9 +101,7 @@ router.get("/:id", async (req, res, next) => {
       throw new ApiError("Holiday not found", 404);
     }
 
-    // Convert database row to Holiday class instance
-    const holiday = Holiday.fromDatabaseRow(holidayRow);
-    res.json({ holiday: holiday.toJSON() });
+    res.json({ holiday: holidayRow });
   } catch (err) {
     next(err);
   }
@@ -163,6 +175,10 @@ router.post("/", async (req, res, next) => {
       ]
     );
 
+    // Invalidate holiday and calendar caches
+    await invalidateHolidayCache(calendar_id);
+    await invalidateCalendarCache(calendar_id);
+
     // Fetch created holiday
     const [[holidayRow]] = await pool.query(
       `SELECT 
@@ -178,12 +194,9 @@ router.post("/", async (req, res, next) => {
       [result.insertId]
     );
 
-    // Convert database row to Holiday class instance
-    const holiday = Holiday.fromDatabaseRow(holidayRow);
-
     res.status(201).json({
       message: "Holiday created successfully",
-      holiday: holiday.toJSON(),
+      holiday: holidayRow,
     });
   } catch (err) {
     next(err);
@@ -274,6 +287,10 @@ router.patch("/:id", async (req, res, next) => {
       throw new ApiError("Failed to update holiday", 500);
     }
 
+    // Invalidate holiday and calendar caches
+    await invalidateHolidayCache(calendar_id, id);
+    await invalidateCalendarCache(calendar_id);
+
     // Fetch updated holiday
     const [[holidayRow]] = await pool.query(
       `SELECT 
@@ -289,12 +306,9 @@ router.patch("/:id", async (req, res, next) => {
       [id]
     );
 
-    // Convert database row to Holiday class instance
-    const holiday = Holiday.fromDatabaseRow(holidayRow);
-
     res.json({
       message: "Holiday updated successfully",
-      holiday: holiday.toJSON(),
+      holiday: holidayRow,
     });
   } catch (err) {
     next(err);
@@ -307,15 +321,17 @@ router.patch("/:id", async (req, res, next) => {
  */
 router.delete("/:id", async (req, res, next) => {
   try {
-    // Check if holiday exists
+    // Check if holiday exists and get calendar_id
     const [[existing]] = await pool.query(
-      "SELECT id FROM attendance_calendar_holidays WHERE id = ?",
+      "SELECT id, calendar_id FROM attendance_calendar_holidays WHERE id = ?",
       [req.params.id]
     );
 
     if (!existing) {
       throw new ApiError("Holiday not found", 404);
     }
+
+    const calendarId = existing.calendar_id;
 
     const [result] = await pool.query("DELETE FROM attendance_calendar_holidays WHERE id = ?", [
       req.params.id,
@@ -324,6 +340,10 @@ router.delete("/:id", async (req, res, next) => {
     if (result.affectedRows === 0) {
       throw new ApiError("Failed to delete holiday", 500);
     }
+
+    // Invalidate holiday and calendar caches
+    await invalidateHolidayCache(calendarId, req.params.id);
+    await invalidateCalendarCache(calendarId);
 
     res.json({ message: "Holiday deleted successfully" });
   } catch (err) {

@@ -4,6 +4,8 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
+const { SELECT_EMPLOYEE_EXISTS } = require("../../queries/employees");
+const { SELECT_DEPARTMENT_EXISTS } = require("../../queries/departments");
 const { createUpdateJobInformationSchema, createJobHistorySchema } = require("../../validations/employeeSchemas");
 const { handleValidationErrors } = require("../../util/validation");
 const { param } = require("express-validator");
@@ -21,7 +23,7 @@ router.get("/:empid/job-information",
   try {
     // Check if employee exists
     const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_EXISTS,
       [empid]
     );
     if (!employee) {
@@ -100,7 +102,7 @@ router.post("/:empid/job-information",
 
     // Check if employee exists
     const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_EXISTS,
       [empid]
     );
     if (!employee) {
@@ -273,7 +275,7 @@ router.get("/:empid/job-history",
   try {
     // Check if employee exists
     const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_EXISTS,
       [empid]
     );
     if (!employee) {
@@ -345,7 +347,7 @@ router.post("/:empid/job-history",
 
     // Check if employee exists
     const [[employee]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_EXISTS,
       [empid]
     );
     if (!employee) {
@@ -355,7 +357,7 @@ router.post("/:empid/job-history",
     // Validate departments if provided
     if (previous_department_id) {
       const [[dept]] = await pool.query(
-        "SELECT deptid FROM departments WHERE deptid = ?",
+        SELECT_DEPARTMENT_EXISTS,
         [previous_department_id]
       );
       if (!dept) {
@@ -365,7 +367,7 @@ router.post("/:empid/job-history",
 
     if (new_department_id) {
       const [[dept]] = await pool.query(
-        "SELECT deptid FROM departments WHERE deptid = ?",
+        SELECT_DEPARTMENT_EXISTS,
         [new_department_id]
       );
       if (!dept) {
@@ -376,7 +378,7 @@ router.post("/:empid/job-history",
     // Validate managers if provided
     if (previous_manager_id) {
       const [[mgr]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [previous_manager_id]
       );
       if (!mgr) {
@@ -386,7 +388,7 @@ router.post("/:empid/job-history",
 
     if (new_manager_id) {
       const [[mgr]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [new_manager_id]
       );
       if (!mgr) {
@@ -397,7 +399,7 @@ router.post("/:empid/job-history",
     // Validate approver
     if (approved_by) {
       const [[approver]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [approved_by]
       );
       if (!approver) {

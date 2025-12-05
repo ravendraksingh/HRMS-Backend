@@ -2,111 +2,63 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Organization = require("../../models/Organization");
 const {
   updateOrganizationSchema,
 } = require("../../validations/organizationSchemas");
 const { handleValidationErrors } = require("../../util/validation");
-const { param } = require("express-validator");
+const { requireHRManagerOrAdmin } = require("../../middlewares/rbac");
+const {
+  withCache,
+  invalidateOrganizationCache,
+  CACHE_PREFIXES,
+} = require("../../util/cacheUtil");
+const { cacheHeaders } = require("../../middlewares/cacheHeaders");
 
 /**
- * GET /organizations
- * Get all organizations or get organization by orgid (query param)
+ * GET /organization/:orgid
+ * Get organization by orgid
  */
-router.get("/", async (req, res, next) => {
+router.get("/:orgid", cacheHeaders.mediumCache, async (req, res, next) => {
   try {
-    // Get all organizations
-    const [[organizationRow]] = await pool.query(
-      "SELECT * FROM organization LIMIT 1"
+    const { orgid } = req.params;
+    const cacheKey = `${CACHE_PREFIXES.ORGANIZATION}:${orgid}`;
+
+    const organizationRow = await withCache(
+      async () => {
+        const [[row]] = await pool.query(
+          "SELECT orgid, name, short_name, logo_url, is_active FROM organization WHERE orgid = ?",
+          [orgid]
+        );
+
+        if (!row) {
+          throw new ApiError("Organization not found", 404);
+        }
+
+        return row;
+      },
+      cacheKey,
+      3600 // 1 hour TTL
     );
 
-    if (!organizationRow) {
-      throw new ApiError("Organization not found", 404);
-    }
-
-    const organization = Organization.fromDatabaseRow(organizationRow);
-    res.json(organization.toJSON());
+    res.json(organizationRow);
   } catch (err) {
     next(err);
   }
 });
 
 /**
- * POST /organizations
- * Create a new organization
- */
-router.post("/", async (req, res, next) => {
-  const { orgid, name, short_name, logo_url, is_active } = req.body;
-
-  try {
-    // Check if orgid already exists
-    const [[existing]] = await pool.query(
-      "SELECT orgid FROM organization WHERE orgid = ?",
-      [orgid.toUpperCase()]
-    );
-
-    if (existing) {
-      throw new ApiError(
-        `Organization with orgid '${orgid}' already exists`,
-        400
-      );
-    }
-
-    // Check if name already exists (unique constraint)
-    const [[existingName]] = await pool.query(
-      "SELECT orgid FROM organization WHERE name = ?",
-      [name]
-    );
-
-    if (existingName) {
-      throw new ApiError(
-        `Organization with name '${name}' already exists`,
-        400
-      );
-    }
-
-    // Insert organization (orgid and is_active are already sanitized by validator)
-    await pool.query(
-      `INSERT INTO organization (orgid, name, short_name, logo_url, is_active) 
-       VALUES (?, ?, ?, ?, ?)`,
-      [orgid, name, short_name || null, logo_url || null, is_active]
-    );
-
-    // Fetch created organization
-    const [[organizationRow]] = await pool.query(
-      "SELECT * FROM organization WHERE orgid = ?",
-      [orgid]
-    );
-
-    const organization = Organization.fromDatabaseRow(organizationRow);
-    res.status(201).json({
-      message: "Organization created successfully",
-      organization: organization.toJSON(),
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
- * PATCH /organizations/:orgid
+ * PATCH /organization/:orgid
  * Update an organization
+ * Requires HRMANAGER or ADMIN role
  */
 router.patch(
   "/:orgid",
   updateOrganizationSchema,
   handleValidationErrors,
+  requireHRManagerOrAdmin,
   async (req, res, next) => {
     const { orgid } = req.params;
-    const {
-      name,
-      short_name,
-      logo_url,
-      is_active,
-      financial_year,
-      fy_start_date,
-      fy_end_date,
-    } = req.body;
+    const { name, short_name, logo_url, is_active } = req.body;
 
     try {
       // Check if organization exists
@@ -133,21 +85,11 @@ router.patch(
       }
 
       // Build update query - all required fields are now mandatory
-      const updates = [
-        "name = ?",
-        "short_name = ?",
-        "is_active = ?",
-        "financial_year = ?",
-        "fy_start_date = ?",
-        "fy_end_date = ?",
-      ];
+      const updates = ["name = ?", "short_name = ?", "is_active = ?"];
       const params = [
         name,
         short_name || null,
-        is_active,
-        financial_year,
-        fy_start_date,
-        fy_end_date,
+        is_active === "Y" || is_active === true ? "Y" : "N",
       ];
 
       // Add optional logo_url if provided
@@ -167,56 +109,16 @@ router.patch(
         throw new ApiError("Failed to update organization", 500);
       }
 
+      // Invalidate organization cache
+      await invalidateOrganizationCache(orgid);
+
       // Fetch updated organization
       const [[organizationRow]] = await pool.query(
-        "SELECT * FROM organization WHERE orgid = ?",
+        "SELECT orgid, name, short_name, logo_url, is_active FROM organization WHERE orgid = ?",
         [orgid]
       );
 
-      const organization = Organization.fromDatabaseRow(organizationRow);
-      res.json({
-        message: "Organization updated successfully",
-        organization: organization.toJSON(),
-      });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-/**
- * DELETE /organizations/:orgid
- * Delete an organization (soft delete by setting is_active = 'N')
- */
-router.delete(
-  "/:orgid",
-  [param("orgid").notEmpty().trim().toUpperCase()],
-  handleValidationErrors,
-  async (req, res, next) => {
-    const { orgid } = req.params;
-
-    try {
-      // Check if organization exists
-      const [[existing]] = await pool.query(
-        "SELECT orgid FROM organization WHERE orgid = ?",
-        [orgid]
-      );
-
-      if (!existing) {
-        throw new ApiError("Organization not found", 404);
-      }
-
-      // Soft delete by setting is_active = 'N'
-      const [result] = await pool.query(
-        "UPDATE organization SET is_active = 'N' WHERE orgid = ?",
-        [orgid]
-      );
-
-      if (result.affectedRows === 0) {
-        throw new ApiError("Failed to delete organization", 500);
-      }
-
-      res.json({ message: "Organization deactivated successfully" });
+      res.json(organizationRow);
     } catch (err) {
       next(err);
     }

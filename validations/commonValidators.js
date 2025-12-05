@@ -32,7 +32,7 @@ const dateValidator = (field, required = true) => {
       .toDate();
   } else {
     return body(field)
-      .optional()
+      .optional({ checkFalsy: true })
       .isISO8601()
       .withMessage(`${field} must be a valid ISO 8601 date (YYYY-MM-DD)`)
       .toDate();

@@ -5,6 +5,7 @@ const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
 const { calculateAttendanceStatus } = require("../../util/attendanceUtil");
+const { SELECT_EMPLOYEE_BY_MANAGER } = require("../../queries/employees");
 
 /**
  * Calculate total work hours from check-in, check-out, and break times
@@ -125,7 +126,7 @@ router.post("/:id/approve", async (req, res, next) => {
 
     // Verify approver is manager of the employee
     const [[manager]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ? AND manager_id = ?",
+      SELECT_EMPLOYEE_BY_MANAGER,
       [request.empid, approved_by]
     );
 
@@ -375,7 +376,7 @@ router.post("/:id/reject", async (req, res, next) => {
 
     // Verify approver is manager of the employee
     const [[manager]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ? AND manager_id = ?",
+      SELECT_EMPLOYEE_BY_MANAGER,
       [request.empid, approved_by]
     );
 

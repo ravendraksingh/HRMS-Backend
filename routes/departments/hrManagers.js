@@ -3,6 +3,8 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
+const { SELECT_DEPARTMENT_EXISTS } = require("../../queries/departments");
+const { SELECT_EMPLOYEE_EXISTS } = require("../../queries/employees");
 
 /**
  * GET /departments/:deptid/hr-managers
@@ -16,7 +18,7 @@ router.get("/:deptid/hr-managers", async (req, res, next) => {
   try {
     // Validate department exists
     const [[department]] = await pool.query(
-      "SELECT deptid FROM departments WHERE deptid = ?",
+      SELECT_DEPARTMENT_EXISTS,
       [deptid.toUpperCase()]
     );
 
@@ -107,7 +109,7 @@ router.post("/:deptid/hr-managers", async (req, res, next) => {
 
     // Validate department exists
     const [[department]] = await pool.query(
-      "SELECT deptid FROM departments WHERE deptid = ?",
+      SELECT_DEPARTMENT_EXISTS,
       [deptid.toUpperCase()]
     );
 
@@ -117,7 +119,7 @@ router.post("/:deptid/hr-managers", async (req, res, next) => {
 
     // Validate HR manager exists
     const [[hrManager]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_EXISTS,
       [hr_manager_empid]
     );
 
@@ -128,7 +130,7 @@ router.post("/:deptid/hr-managers", async (req, res, next) => {
     // Validate assigned_by if provided
     if (assigned_by) {
       const [[assigner]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [assigned_by]
       );
       if (!assigner) {

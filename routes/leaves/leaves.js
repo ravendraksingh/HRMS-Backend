@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Leave = require("../../models/Leave");
+const { SELECT_EMPLOYEE_EXISTS } = require("../../queries/employees");
 
 router.get("/:id", async (req, res, next) => {
   try {
@@ -29,9 +29,7 @@ router.get("/:id", async (req, res, next) => {
     );
     if (!leave) throw new ApiError("Leave not found", 404);
 
-    // Convert database row to Leave class instance
-    const leaveRecord = Leave.fromDatabaseRow(leave);
-    res.json(leaveRecord.toJSON());
+    res.json(leave);
   } catch (err) {
     next(err);
   }
@@ -130,7 +128,7 @@ router.post("/:id/approve", async (req, res, next) => {
 
     // Validate approver exists
     const [[approver]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_EXISTS,
       [approved_by]
     );
     if (!approver) {
@@ -189,7 +187,7 @@ router.post("/:id/reject", async (req, res, next) => {
 
     // Validate approver exists
     const [[approver]] = await pool.query(
-      "SELECT empid FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_EXISTS,
       [approved_by]
     );
     if (!approver) {

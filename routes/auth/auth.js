@@ -12,6 +12,8 @@ const {
 } = require("../../util/authUtil");
 const { loginSchema } = require("../../validations/authSchemas");
 const { handleValidationErrors } = require("../../util/validation");
+const logger = require("../../util/logger");
+const { cacheHeaders } = require("../../middlewares/cacheHeaders");
 
 // Get JWT_SECRET from environment variables (required)
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -24,14 +26,18 @@ if (!JWT_SECRET) {
 
 router.post(
   "/login",
-  //   loginSchema,
-  //   handleValidationErrors,
+  cacheHeaders.noCache,
+  loginSchema,
+  handleValidationErrors,
   async (req, res, next) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
+      logger.warn({ route: '/login', username }, 'Login attempt with missing credentials');
       throw new ApiError("username and password are required", 400);
     }
+
+    logger.info({ route: '/login', username }, 'Login attempt started');
 
     async function verifyPassword(inputPassword, storedHash) {
       const isMatch = await bcrypt.compare(inputPassword, storedHash);
@@ -44,14 +50,21 @@ router.post(
         [username]
       );
 
-      if (!user) throw new ApiError("Username not found", 404);
+      if (!user) {
+        logger.warn({ route: '/login', username }, 'Login failed: User not found');
+        throw new ApiError("Invalid credentials", 400);
+      }
 
       const verified = await verifyPassword(password, user.password);
-      if (!verified) throw new ApiError("Invalid credentials", 400);
+      if (!verified) {
+        logger.warn({ route: '/login', username, empid: user.empid }, 'Login failed: Invalid password');
+        throw new ApiError("Invalid credentials", 400);
+      }
 
       // Check if user is active
       if (user.is_active !== "Y") {
-        throw new ApiError("User account is inactive", 403);
+        logger.warn({ route: '/login', username, empid: user.empid }, 'Login failed: User inactive');
+        throw new ApiError("Invalid credentials", 400);
       }
 
       // Update last_login timestamp for this user
@@ -66,7 +79,8 @@ router.post(
       );
 
       if (!emp) {
-        throw new ApiError("Employee not found for this user", 404);
+        logger.error({ route: '/login', username, empid: user.empid }, 'Login failed: Employee not found');
+        throw new ApiError("Invalid credentials", 400);
       }
 
       // Fetch user roles
@@ -132,6 +146,19 @@ router.post(
       // res.cookie("accessToken", accessToken, cookieOptions);
       // res.cookie("refreshToken", refreshToken, refreshCookieOptions);
 
+      logger.info(
+        { 
+          route: '/login', 
+          username, 
+          empid: user.empid, 
+          name: emp.name,
+          roles: userRoles,
+          ip: req.ip,
+          userAgent: req.get('user-agent')
+        }, 
+        'Login successful'
+      );
+
       res.json({
         access_token: accessToken,
         refresh_token: refreshToken, // Send plain token to client (for non-cookie clients)
@@ -140,38 +167,22 @@ router.post(
         user: userDetails,
       });
     } catch (error) {
+      logger.error(
+        { 
+          route: '/login', 
+          username, 
+          error: error.message,
+          stack: error.stack,
+          ip: req.ip
+        }, 
+        'Login error'
+      );
       next(error);
     }
   }
 );
 
-router.post("/register", async (req, res, next) => {
-  const { empid, username, password, is_active } = req.body;
-  try {
-    // Validate required fields
-    if (!empid || !username || !password) {
-      throw new ApiError("empid, username, and password are required", 400);
-    }
-
-    // Hash the password with salt rounds (10 is a good default)
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    // Insert new user with hashed password in the database
-    const query =
-      "INSERT INTO users (empid, username, password, is_active) VALUES (?, ?, ?, ?)";
-    const params = [empid, username, hashedPassword, is_active || "N"];
-    await pool.query(query, params);
-
-    res
-      .status(201)
-      .json({ success: true, message: "User registered successfully" });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post("/updatePassword", async (req, res, next) => {
+router.post("/updatePassword", cacheHeaders.noCache, async (req, res, next) => {
   const { username, password } = req.body;
   try {
     // Hash the password with salt rounds (10 is a good default)
@@ -189,29 +200,13 @@ router.post("/updatePassword", async (req, res, next) => {
   }
 });
 
-router.get("/users/:empid", async (req, res, next) => {
-  const empid = req.params.empid;
-  try {
-    const query = "SELECT * FROM users WHERE empid = ?";
-    const [[user]] = await pool.query(query, [empid]);
-
-    if (!user) {
-      throw new ApiError("User not found", 404);
-    }
-
-    res.status(200).json(user);
-  } catch (error) {
-    next(error);
-  }
-});
-
 /**
  * POST /auth/refresh
  * Refresh access token using refresh token
  * Body: { refresh_token: string }
  * Returns: { access_token: string, token_type: "Bearer", expires_in: number }
  */
-router.post("/refresh", async (req, res, next) => {
+router.post("/refresh", cacheHeaders.noCache, async (req, res, next) => {
   // Try to get refresh token from cookie first, then from body
   let refresh_token = req.cookies?.refreshToken || req.body?.refresh_token;
 
@@ -297,16 +292,26 @@ router.post("/refresh", async (req, res, next) => {
   }
 });
 
-router.post("/logout", async (req, res, next) => {
+router.post("/logout", cacheHeaders.noCache, async (req, res, next) => {
   // Try to get refresh token from cookie first, then from body
   let refresh_token = req.cookies?.refreshToken || req.body?.refresh_token;
 
   if (!refresh_token) {
+    logger.warn({ route: '/logout', ip: req.ip }, 'Logout attempt without refresh token');
     return next(new ApiError("Refresh token is required", 400));
   }
 
   try {
     const hashedToken = hashRefreshToken(refresh_token);
+
+    // Get user info before revoking token for logging
+    const [[tokenRecord]] = await pool.query(
+      `SELECT rt.empid, u.username
+       FROM refresh_tokens rt
+       INNER JOIN users u ON rt.empid = u.empid
+       WHERE rt.token = ? AND rt.revoked_at IS NULL`,
+      [hashedToken]
+    );
 
     // Revoke refresh token
     await pool.query(
@@ -318,10 +323,34 @@ router.post("/logout", async (req, res, next) => {
     res.clearCookie("accessToken");
     res.clearCookie("refreshToken");
 
+    if (tokenRecord) {
+      logger.info(
+        { 
+          route: '/logout', 
+          username: tokenRecord.username, 
+          empid: tokenRecord.empid,
+          ip: req.ip,
+          userAgent: req.get('user-agent')
+        }, 
+        'Logout successful'
+      );
+    } else {
+      logger.warn({ route: '/logout', ip: req.ip }, 'Logout attempted with invalid token');
+    }
+
     res.json({
       message: "Logged out successfully",
     });
   } catch (error) {
+    logger.error(
+      { 
+        route: '/logout', 
+        error: error.message,
+        stack: error.stack,
+        ip: req.ip
+      }, 
+      'Logout error'
+    );
     next(error);
   }
 });

@@ -2,7 +2,6 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Overtime = require("../../models/Overtime");
 
 /**
  * GET /attendance/overtime
@@ -55,10 +54,9 @@ router.get("/", async (req, res, next) => {
       params
     );
     
-    const overtimeRecords = Overtime.fromDatabaseRows(rows);
     res.json({ 
-      count: overtimeRecords.length,
-      overtime: overtimeRecords.map(o => o.toJSON())
+      count: rows.length,
+      overtime: rows
     });
   } catch (err) {
     next(err);

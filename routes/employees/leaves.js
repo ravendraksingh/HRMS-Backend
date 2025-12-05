@@ -4,7 +4,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Leave = require("../../models/Leave");
+const { SELECT_EMPLOYEE_EXISTS, SELECT_EMPLOYEE_NAME } = require("../../queries/employees");
 const {
   getLeavesQuerySchema,
   createLeaveSchema,
@@ -30,7 +30,7 @@ router.get(
     try {
       // Validate employee exists
       const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [empid]
       );
 
@@ -88,15 +88,12 @@ router.get(
         params
       );
 
-      // Convert database rows to Leave class instances
-      const leaveRecords = Leave.fromDatabaseRows(rows);
-
       res.json({
         empid: empid,
         start_date: start_date || null,
         end_date: end_date || null,
-        count: leaveRecords.length,
-        leaves: leaveRecords.map((leave) => leave.toJSON()),
+        count: rows.length,
+        leaves: rows,
       });
     } catch (err) {
       next(err);
@@ -127,7 +124,7 @@ router.post(
     try {
       // Validate employee exists
       const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
+        SELECT_EMPLOYEE_EXISTS,
         [empid]
       );
 
@@ -188,7 +185,7 @@ router.get("/:empid/leaves/summary/yearly", async (req, res, next) => {
   try {
     // Validate employee exists
     const [[employee]] = await pool.query(
-      "SELECT empid, name FROM employees WHERE empid = ?",
+      SELECT_EMPLOYEE_NAME,
       [empid]
     );
 

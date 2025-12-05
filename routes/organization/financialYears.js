@@ -4,6 +4,13 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
+const { SELECT_EMPLOYEE_EXISTS } = require("../../queries/employees");
+const { requireHRManagerOrAdmin } = require("../../middlewares/rbac");
+const {
+  withCache,
+  invalidateFinancialYearCache,
+  CACHE_PREFIXES,
+} = require("../../util/cacheUtil");
 
 /**
  * GET /financial-years
@@ -14,47 +21,62 @@ router.get("/", async (req, res, next) => {
   const { is_active, is_current } = req.query;
 
   try {
-    let whereClauses = [];
-    let params = [];
+    // Build cache key based on filters
+    const filterKey =
+      is_active !== undefined || is_current !== undefined
+        ? `:filter:${is_active || "all"}:${is_current || "all"}`
+        : "";
+    const cacheKey = `${CACHE_PREFIXES.FINANCIAL_YEAR}:list${filterKey}`;
 
-    if (is_active !== undefined) {
-      whereClauses.push("fy.is_active = ?");
-      params.push(is_active.toUpperCase() === "TRUE" || is_active === "Y" ? "Y" : "N");
-    }
+    const result = await withCache(
+      async () => {
+        let whereClauses = [];
+        let params = [];
 
-    if (is_current !== undefined) {
-      whereClauses.push("fy.is_current = ?");
-      params.push(is_current.toUpperCase() === "TRUE" || is_current === "Y" ? "Y" : "N");
-    }
+        if (is_active !== undefined) {
+          whereClauses.push("fy.is_active = ?");
+          params.push(
+            is_active.toUpperCase() === "TRUE" || is_active === "Y" ? "Y" : "N"
+          );
+        }
 
-    const whereSql = whereClauses.length > 0 
-      ? `WHERE ${whereClauses.join(" AND ")}` 
-      : "";
+        if (is_current !== undefined) {
+          whereClauses.push("fy.is_current = ?");
+          params.push(
+            is_current.toUpperCase() === "TRUE" || is_current === "Y"
+              ? "Y"
+              : "N"
+          );
+        }
 
-    const [financialYears] = await pool.query(
-      `SELECT 
-        fy.id,
-        fy.financial_year,
-        DATE_FORMAT(fy.start_date, '%Y-%m-%d') as start_date,
-        DATE_FORMAT(fy.end_date, '%Y-%m-%d') as end_date,
-        fy.is_current,
-        fy.is_active,
-        fy.description,
-        fy.created_by,
-        DATE_FORMAT(fy.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
-        DATE_FORMAT(fy.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
-        e.name as created_by_name
-      FROM financial_years fy
-      LEFT JOIN employees e ON fy.created_by = e.empid
-      ${whereSql}
-      ORDER BY fy.start_date DESC, fy.id DESC`,
-      params
+        const whereSql =
+          whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+        const [financialYears] = await pool.query(
+          `SELECT 
+            fy.id,
+            fy.financial_year,
+            DATE_FORMAT(fy.start_date, '%Y-%m-%d') as start_date,
+            DATE_FORMAT(fy.end_date, '%Y-%m-%d') as end_date,
+            fy.is_current,
+            fy.is_active,
+            fy.description,
+            fy.created_by
+          FROM financial_years fy
+          ${whereSql}
+          ORDER BY fy.start_date DESC`,
+          params
+        );
+
+        return {
+          financial_years: financialYears,
+        };
+      },
+      cacheKey,
+      3600 // 1 hour TTL
     );
 
-    res.json({
-      count: financialYears.length,
-      financial_years: financialYears,
-    });
+    res.json(result);
   } catch (error) {
     next(error);
   }
@@ -67,28 +89,33 @@ router.get("/", async (req, res, next) => {
  */
 router.get("/current", async (req, res, next) => {
   try {
-    const [[financialYear]] = await pool.query(
-      `SELECT 
-        fy.id,
-        fy.financial_year,
-        DATE_FORMAT(fy.start_date, '%Y-%m-%d') as start_date,
-        DATE_FORMAT(fy.end_date, '%Y-%m-%d') as end_date,
-        fy.is_current,
-        fy.is_active,
-        fy.description,
-        fy.created_by,
-        DATE_FORMAT(fy.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
-        DATE_FORMAT(fy.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
-        e.name as created_by_name
-      FROM financial_years fy
-      LEFT JOIN employees e ON fy.created_by = e.empid
-      WHERE fy.is_current = 'Y'
-      LIMIT 1`
-    );
+    const cacheKey = `${CACHE_PREFIXES.FINANCIAL_YEAR}:current`;
 
-    if (!financialYear) {
-      throw new ApiError("No current financial year found", 404);
-    }
+    const financialYear = await withCache(
+      async () => {
+        const [[row]] = await pool.query(
+          `SELECT 
+            id,
+            financial_year,
+            DATE_FORMAT(start_date, '%Y-%m-%d') as start_date,
+            DATE_FORMAT(end_date, '%Y-%m-%d') as end_date,
+            is_current,
+            is_active,
+            description
+          FROM financial_years
+          WHERE is_current = 'Y'
+          LIMIT 1`
+        );
+
+        if (!row) {
+          throw new ApiError("No current financial year found", 404);
+        }
+
+        return row;
+      },
+      cacheKey,
+      3600 // 1 hour TTL
+    );
 
     res.json(financialYear);
   } catch (error) {
@@ -104,28 +131,33 @@ router.get("/:id", async (req, res, next) => {
   const { id } = req.params;
 
   try {
-    const [[financialYear]] = await pool.query(
-      `SELECT 
-        fy.id,
-        fy.financial_year,
-        DATE_FORMAT(fy.start_date, '%Y-%m-%d') as start_date,
-        DATE_FORMAT(fy.end_date, '%Y-%m-%d') as end_date,
-        fy.is_current,
-        fy.is_active,
-        fy.description,
-        fy.created_by,
-        DATE_FORMAT(fy.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
-        DATE_FORMAT(fy.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
-        e.name as created_by_name
-      FROM financial_years fy
-      LEFT JOIN employees e ON fy.created_by = e.empid
-      WHERE fy.id = ?`,
-      [id]
-    );
+    const cacheKey = `${CACHE_PREFIXES.FINANCIAL_YEAR}:${id}`;
 
-    if (!financialYear) {
-      throw new ApiError("Financial year not found", 404);
-    }
+    const financialYear = await withCache(
+      async () => {
+        const [[row]] = await pool.query(
+          `SELECT 
+            id,
+            financial_year,
+            DATE_FORMAT(start_date, '%Y-%m-%d') as start_date,
+            DATE_FORMAT(end_date, '%Y-%m-%d') as end_date,
+            is_current,
+            is_active,
+            description
+          FROM financial_years
+          WHERE id = ?`,
+          [id]
+        );
+
+        if (!row) {
+          throw new ApiError("Financial year not found", 404);
+        }
+
+        return row;
+      },
+      cacheKey,
+      3600 // 1 hour TTL
+    );
 
     res.json(financialYear);
   } catch (error) {
@@ -136,10 +168,11 @@ router.get("/:id", async (req, res, next) => {
 /**
  * POST /financial-years
  * Create a new financial year
- * Body: financial_year (YYYY-YY), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), 
+ * Body: financial_year (YYYY-YY), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD),
  *       is_current (optional), is_active (optional), description (optional), created_by (optional)
+ * Requires HRMANAGER or ADMIN role
  */
-router.post("/", async (req, res, next) => {
+router.post("/", requireHRManagerOrAdmin, async (req, res, next) => {
   const {
     financial_year,
     start_date,
@@ -170,26 +203,14 @@ router.post("/", async (req, res, next) => {
 
     // Validate start_date is 1 April
     const startDateObj = new Date(start_date);
-    if (
-      startDateObj.getMonth() !== 3 ||
-      startDateObj.getDate() !== 1
-    ) {
-      throw new ApiError(
-        "start_date must be 1 April (YYYY-04-01)",
-        400
-      );
+    if (startDateObj.getMonth() !== 3 || startDateObj.getDate() !== 1) {
+      throw new ApiError("start_date must be 1 April (YYYY-04-01)", 400);
     }
 
     // Validate end_date is 31 March
     const endDateObj = new Date(end_date);
-    if (
-      endDateObj.getMonth() !== 2 ||
-      endDateObj.getDate() !== 31
-    ) {
-      throw new ApiError(
-        "end_date must be 31 March (YYYY-03-31)",
-        400
-      );
+    if (endDateObj.getMonth() !== 2 || endDateObj.getDate() !== 31) {
+      throw new ApiError("end_date must be 31 March (YYYY-03-31)", 400);
     }
 
     // Validate date relationship
@@ -234,10 +255,9 @@ router.post("/", async (req, res, next) => {
 
     // Validate created_by if provided
     if (created_by) {
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ?",
-        [created_by]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [
+        created_by,
+      ]);
       if (!employee) {
         throw new ApiError("created_by employee not found", 404);
       }
@@ -258,6 +278,9 @@ router.post("/", async (req, res, next) => {
         created_by || null,
       ]
     );
+
+    // Invalidate financial year caches
+    await invalidateFinancialYearCache();
 
     // Fetch created financial year
     const [[newFinancialYear]] = await pool.query(
@@ -293,8 +316,9 @@ router.post("/", async (req, res, next) => {
  * Update a financial year
  * Body: financial_year (optional), start_date (optional), end_date (optional),
  *       is_current (optional), is_active (optional), description (optional)
+ * Requires HRMANAGER or ADMIN role
  */
-router.patch("/:id", async (req, res, next) => {
+router.patch("/:id", requireHRManagerOrAdmin, async (req, res, next) => {
   const { id } = req.params;
   const {
     financial_year,
@@ -350,14 +374,8 @@ router.patch("/:id", async (req, res, next) => {
     // Update start_date if provided
     if (start_date !== undefined) {
       const startDateObj = new Date(start_date);
-      if (
-        startDateObj.getMonth() !== 3 ||
-        startDateObj.getDate() !== 1
-      ) {
-        throw new ApiError(
-          "start_date must be 1 April (YYYY-04-01)",
-          400
-        );
+      if (startDateObj.getMonth() !== 3 || startDateObj.getDate() !== 1) {
+        throw new ApiError("start_date must be 1 April (YYYY-04-01)", 400);
       }
       updates.push("start_date = ?");
       params.push(start_date);
@@ -366,14 +384,8 @@ router.patch("/:id", async (req, res, next) => {
     // Update end_date if provided
     if (end_date !== undefined) {
       const endDateObj = new Date(end_date);
-      if (
-        endDateObj.getMonth() !== 2 ||
-        endDateObj.getDate() !== 31
-      ) {
-        throw new ApiError(
-          "end_date must be 31 March (YYYY-03-31)",
-          400
-        );
+      if (endDateObj.getMonth() !== 2 || endDateObj.getDate() !== 31) {
+        throw new ApiError("end_date must be 31 March (YYYY-03-31)", 400);
       }
       updates.push("end_date = ?");
       params.push(end_date);
@@ -416,8 +428,9 @@ router.patch("/:id", async (req, res, next) => {
 
     // Update is_current if provided
     if (is_current !== undefined) {
-      const newIsCurrent = is_current === "Y" || is_current === true ? "Y" : "N";
-      
+      const newIsCurrent =
+        is_current === "Y" || is_current === true ? "Y" : "N";
+
       // If setting as current, unset all others first
       if (newIsCurrent === "Y" && existing.is_current !== "Y") {
         await pool.query(
@@ -425,7 +438,7 @@ router.patch("/:id", async (req, res, next) => {
           [id]
         );
       }
-      
+
       updates.push("is_current = ?");
       params.push(newIsCurrent);
     }
@@ -458,30 +471,25 @@ router.patch("/:id", async (req, res, next) => {
       throw new ApiError("Failed to update financial year", 500);
     }
 
+    // Invalidate financial year caches
+    await invalidateFinancialYearCache(id);
+
     // Fetch updated financial year
     const [[updatedFinancialYear]] = await pool.query(
       `SELECT 
-        fy.id,
-        fy.financial_year,
-        DATE_FORMAT(fy.start_date, '%Y-%m-%d') as start_date,
-        DATE_FORMAT(fy.end_date, '%Y-%m-%d') as end_date,
-        fy.is_current,
-        fy.is_active,
-        fy.description,
-        fy.created_by,
-        DATE_FORMAT(fy.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
-        DATE_FORMAT(fy.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at,
-        e.name as created_by_name
-      FROM financial_years fy
-      LEFT JOIN employees e ON fy.created_by = e.empid
-      WHERE fy.id = ?`,
+        id,
+        financial_year,
+        DATE_FORMAT(start_date, '%Y-%m-%d') as start_date,
+        DATE_FORMAT(end_date, '%Y-%m-%d') as end_date,
+        is_current,
+        is_active,
+        description
+      FROM financial_years
+      WHERE id = ?`,
       [id]
     );
 
-    res.json({
-      message: "Financial year updated successfully",
-      financial_year: updatedFinancialYear,
-    });
+    res.json(updatedFinancialYear);
   } catch (error) {
     next(error);
   }
@@ -490,8 +498,9 @@ router.patch("/:id", async (req, res, next) => {
 /**
  * DELETE /financial-years/:id
  * Delete a financial year (soft delete by setting is_active = 'N')
+ * Requires HRMANAGER or ADMIN role
  */
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requireHRManagerOrAdmin, async (req, res, next) => {
   const { id } = req.params;
 
   try {
@@ -523,6 +532,9 @@ router.delete("/:id", async (req, res, next) => {
       throw new ApiError("Failed to delete financial year", 500);
     }
 
+    // Invalidate financial year caches
+    await invalidateFinancialYearCache(id);
+
     res.json({ message: "Financial year deactivated successfully" });
   } catch (error) {
     next(error);
@@ -530,4 +542,3 @@ router.delete("/:id", async (req, res, next) => {
 });
 
 module.exports = router;
-

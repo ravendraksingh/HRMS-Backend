@@ -2,7 +2,6 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Attendance = require("../../models/Attendance");
 
 /**
  * GET /attendance/daily
@@ -40,13 +39,10 @@ router.get("/attendance/daily", async (req, res, next) => {
       [attendance_date]
     );
 
-    // Convert database rows to Attendance class instances
-    const attendanceRecords = Attendance.fromDatabaseRows(rows);
-
     res.json({
       attendance_date: attendance_date,
-      count: attendanceRecords.length,
-      attendance: attendanceRecords.map((att) => att.toJSON()),
+      count: rows.length,
+      attendance: rows,
     });
   } catch (err) {
     next(err);

@@ -3,7 +3,6 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const Attendance = require("../../models/Attendance");
 const { calculateAttendanceStatus } = require("../../util/attendanceUtil");
 const { isWorkingDay } = require("../../util/calendarUtil");
 
@@ -85,9 +84,7 @@ router.get("/:id", async (req, res, next) => {
 
     if (!record) throw new ApiError("Attendance record not found", 404);
 
-    // Convert database row to Attendance class instance
-    const attendanceRecord = Attendance.fromDatabaseRow(record);
-    res.json(attendanceRecord.toJSON());
+    res.json(record);
   } catch (error) {
     next(error);
   }

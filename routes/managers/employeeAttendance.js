@@ -4,6 +4,11 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
+const {
+  SELECT_EMPLOYEE_NAME,
+  SELECT_EMPLOYEE_BY_MANAGER,
+} = require("../../queries/employees");
+const logger = require("../../util/logger");
 
 /**
  * GET /managers/:managerEmpId/employees/attendance
@@ -12,15 +17,37 @@ const ApiError = require("../../errors/ApiError");
 router.get("/:managerEmpId/employees/attendance", async (req, res, next) => {
   const managerEmpId = req.params.managerEmpId;
   const { start_date, end_date, status, empid } = req.query;
+  const requestedBy = req.user?.empid || "unknown";
+
+  logger.info(
+    {
+      route: "/managers/:managerEmpId/employees/attendance",
+      method: "GET",
+      managerEmpId,
+      requestedBy,
+      start_date,
+      end_date,
+      status,
+      empid,
+      ip: req.ip,
+    },
+    "Manager fetching team attendance"
+  );
 
   try {
     // Verify manager exists
-    const [[manager]] = await pool.query(
-      "SELECT empid, name FROM employees WHERE empid = ?",
-      [managerEmpId]
-    );
+    const [[manager]] = await pool.query(SELECT_EMPLOYEE_NAME, [managerEmpId]);
 
     if (!manager) {
+      logger.warn(
+        {
+          route: "/managers/:managerEmpId/employees/attendance",
+          method: "GET",
+          managerEmpId,
+          requestedBy,
+        },
+        "Manager not found"
+      );
       throw new ApiError("Manager not found", 404);
     }
 
@@ -29,10 +56,10 @@ router.get("/:managerEmpId/employees/attendance", async (req, res, next) => {
     if (empid) {
       // Filter by specific employee if provided
       // Verify employee reports to this manager
-      const [[employee]] = await pool.query(
-        "SELECT empid FROM employees WHERE empid = ? AND manager_id = ?",
-        [empid, managerEmpId]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_BY_MANAGER, [
+        empid,
+        managerEmpId,
+      ]);
       if (!employee) {
         throw new ApiError(
           "Employee not found or doesn't report to this manager",
@@ -118,6 +145,17 @@ router.get("/:managerEmpId/employees/attendance", async (req, res, next) => {
       params
     );
 
+    logger.debug(
+      {
+        route: "/managers/:managerEmpId/employees/attendance",
+        method: "GET",
+        managerEmpId,
+        requestedBy,
+        attendanceCount: attendance.length,
+      },
+      "Team attendance retrieved successfully"
+    );
+
     res.json({
       manager_empid: managerEmpId,
       manager_name: manager.name,
@@ -131,6 +169,18 @@ router.get("/:managerEmpId/employees/attendance", async (req, res, next) => {
       attendance: attendance,
     });
   } catch (error) {
+    logger.error(
+      {
+        route: "/managers/:managerEmpId/employees/attendance",
+        method: "GET",
+        managerEmpId,
+        requestedBy,
+        error: error.message,
+        stack: error.stack,
+        ip: req.ip,
+      },
+      "Error fetching team attendance"
+    );
     next(error);
   }
 });
@@ -144,16 +194,40 @@ router.get(
   "/:managerEmpId/employees/attendance/corrections",
   async (req, res, next) => {
     const managerEmpId = req.params.managerEmpId;
-    const { from_date, to_date, empid, status } = req.query;
+    const { start_date, end_date, empid, status } = req.query;
+    const requestedBy = req.user?.empid || "unknown";
+
+    logger.info(
+      {
+        route: "/managers/:managerEmpId/employees/attendance/corrections",
+        method: "GET",
+        managerEmpId,
+        requestedBy,
+        start_date,
+        end_date,
+        empid,
+        status,
+        ip: req.ip,
+      },
+      "Manager fetching team attendance corrections"
+    );
 
     try {
       // Verify manager exists
-      const [[manager]] = await pool.query(
-        "SELECT empid, name FROM employees WHERE empid = ?",
-        [managerEmpId]
-      );
+      const [[manager]] = await pool.query(SELECT_EMPLOYEE_NAME, [
+        managerEmpId,
+      ]);
 
       if (!manager) {
+        logger.warn(
+          {
+            route: "/managers/:managerEmpId/employees/attendance/corrections",
+            method: "GET",
+            managerEmpId,
+            requestedBy,
+          },
+          "Manager not found"
+        );
         throw new ApiError("Manager not found", 404);
       }
 
@@ -161,10 +235,10 @@ router.get(
       let teamMemberEmpids = [];
       if (empid) {
         // Filter by specific employee if provided
-        const [[employee]] = await pool.query(
-          "SELECT empid FROM employees WHERE empid = ? AND manager_id = ?",
-          [empid, managerEmpId]
-        );
+        const [[employee]] = await pool.query(SELECT_EMPLOYEE_BY_MANAGER, [
+          empid,
+          managerEmpId,
+        ]);
         if (!employee) {
           throw new ApiError(
             "Employee not found or doesn't report to this manager",
@@ -207,13 +281,13 @@ router.get(
         params.push(status.toUpperCase());
       }
 
-      if (from_date) {
+      if (start_date) {
         whereClauses.push("acr.correction_date >= ?");
-        params.push(from_date);
+        params.push(start_date);
       }
-      if (to_date) {
+      if (end_date) {
         whereClauses.push("acr.correction_date <= ?");
-        params.push(to_date);
+        params.push(end_date);
       }
 
       const whereSql = `WHERE ${whereClauses.join(" AND ")}`;
@@ -241,19 +315,42 @@ router.get(
         params
       );
 
+      logger.debug(
+        {
+          route: "/managers/:managerEmpId/employees/attendance/corrections",
+          method: "GET",
+          managerEmpId,
+          requestedBy,
+          correctionsCount: corrections.length,
+        },
+        "Team attendance corrections retrieved successfully"
+      );
+
       res.json({
         manager_id: managerEmpId,
         manager_name: manager.name,
-        corrections: corrections,
         count: corrections.length,
         filters: {
-          from_date: from_date || null,
-          to_date: to_date || null,
+          start_date: start_date || null,
+          end_date: end_date || null,
           empid: empid || null,
           status: status || null,
         },
+        corrections: corrections,
       });
     } catch (error) {
+      logger.error(
+        {
+          route: "/managers/:managerEmpId/employees/attendance/corrections",
+          method: "GET",
+          managerEmpId,
+          requestedBy,
+          error: error.message,
+          stack: error.stack,
+          ip: req.ip,
+        },
+        "Error fetching team attendance corrections"
+      );
       next(error);
     }
   }

@@ -208,8 +208,27 @@
                   "language": "json"
                 }
               }
+            },
+            "description": "Refresh access token using a valid refresh token. Returns a new access token (expires in 15 minutes). New access token is automatically saved."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.access_token) {",
+                  "        pm.collectionVariables.set('token', jsonData.access_token);",
+                  "        pm.environment.set('token', jsonData.access_token);",
+                  "        console.log('✅ New access token saved');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
             }
-          }
+          ]
         },
         {
           "name": "Logout",
@@ -243,33 +262,6 @@
                   "language": "json"
                 }
               }
-            }
-          }
-        },
-        {
-          "name": "Get User by EmpID",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/auth/users/{{empid}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "users",
-                "{{empid}}"
-              ],
-              "query": []
-            },
-            "auth": {
-              "type": "noauth"
             }
           }
         }
@@ -334,54 +326,6 @@
     {
       "name": "Employees",
       "item": [
-        {
-          "name": "Get All Employees",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/employees?department_id={{department_id}}&manager_id={{manager_id}}&location_id={{location_id}}&name={{name}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "employees"
-              ],
-              "query": [
-                {
-                  "key": "department_id",
-                  "value": "",
-                  "description": "Filter by department ID",
-                  "disabled": true
-                },
-                {
-                  "key": "manager_id",
-                  "value": "",
-                  "description": "Filter by manager ID",
-                  "disabled": true
-                },
-                {
-                  "key": "location_id",
-                  "value": "",
-                  "description": "Filter by location ID",
-                  "disabled": true
-                },
-                {
-                  "key": "name",
-                  "value": "",
-                  "description": "Filter by name (partial match)",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "Get all employees with optional filters"
-          }
-        },
         {
           "name": "Get Employee by ID",
           "request": {
@@ -2947,7 +2891,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/managers/{{managerEmpId}}/employees/attendance?start_date={{start_date}}&end_date={{end_date}}&status={{status}}",
+              "raw": "{{baseUrl}}/managers/{{managerEmpId}}/employees/attendance?start_date={{start_date}}&end_date={{end_date}}&status={{status}}&empid={{empid}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2961,13 +2905,13 @@
                 {
                   "key": "start_date",
                   "value": "2024-01-01",
-                  "description": "Start date in YYYY-MM-DD format",
+                  "description": "Start date in YYYY-MM-DD format (co-mandatory with end_date)",
                   "disabled": true
                 },
                 {
                   "key": "end_date",
                   "value": "2024-12-31",
-                  "description": "End date in YYYY-MM-DD format",
+                  "description": "End date in YYYY-MM-DD format (co-mandatory with start_date)",
                   "disabled": true
                 },
                 {
@@ -2975,55 +2919,20 @@
                   "value": "PRESENT",
                   "description": "Filter by status: PRESENT, ABSENT, etc.",
                   "disabled": true
-                }
-              ]
-            },
-            "description": "Get team attendance"
-          }
-        },
-        {
-          "name": "Get Pending Attendance Corrections",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/managers/{{managerEmpId}}/employees/attendance/corrections/pending?from_date={{from_date}}&to_date={{to_date}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "managers",
-                "{{managerEmpId}}",
-                "employees",
-                "attendance",
-                "corrections",
-                "pending"
-              ],
-              "query": [
-                {
-                  "key": "from_date",
-                  "value": "2024-01-01",
-                  "description": "Filter from date (YYYY-MM-DD)",
-                  "disabled": true
                 },
                 {
-                  "key": "to_date",
-                  "value": "2024-12-31",
-                  "description": "Filter to date (YYYY-MM-DD)",
+                  "key": "empid",
+                  "value": "",
+                  "description": "Filter by specific employee ID",
                   "disabled": true
                 }
               ]
             },
-            "description": "Get pending attendance corrections for team"
+            "description": "Get team attendance data. If start_date and end_date are not provided, defaults to today's date."
           }
         },
         {
-          "name": "Get All Attendance Corrections",
+          "name": "Get Attendance Corrections for Team",
           "request": {
             "method": "GET",
             "header": [
@@ -3033,7 +2942,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/managers/{{managerEmpId}}/employees/attendance/corrections?from_date={{from_date}}&to_date={{to_date}}&status={{status}}",
+              "raw": "{{baseUrl}}/managers/{{managerEmpId}}/employees/attendance/corrections?start_date={{start_date}}&end_date={{end_date}}&empid={{empid}}&status={{status}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -3046,15 +2955,21 @@
               ],
               "query": [
                 {
-                  "key": "from_date",
+                  "key": "start_date",
                   "value": "2024-01-01",
                   "description": "Filter from date (YYYY-MM-DD)",
                   "disabled": true
                 },
                 {
-                  "key": "to_date",
+                  "key": "end_date",
                   "value": "2024-12-31",
                   "description": "Filter to date (YYYY-MM-DD)",
+                  "disabled": true
+                },
+                {
+                  "key": "empid",
+                  "value": "",
+                  "description": "Filter by specific employee ID",
                   "disabled": true
                 },
                 {
@@ -3065,11 +2980,11 @@
                 }
               ]
             },
-            "description": "Get all attendance corrections for team"
+            "description": "Get attendance corrections for team members (all statuses). Use status=PENDING to filter for pending only."
           }
         },
         {
-          "name": "Get Pending Leave Requests",
+          "name": "Get Leaves for Specific Employee",
           "request": {
             "method": "GET",
             "header": [
@@ -3079,32 +2994,84 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/managers/{{id}}/leaves/pending?from={{from}}&to={{to}}",
+              "raw": "{{baseUrl}}/managers/{{managerEmpId}}/employees/{{employeeId}}/leaves?start_date={{start_date}}&end_date={{end_date}}&status={{status}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "managers",
-                "{{id}}",
-                "leaves",
-                "pending"
+                "{{managerEmpId}}",
+                "employees",
+                "{{employeeId}}",
+                "leaves"
               ],
               "query": [
                 {
-                  "key": "from",
+                  "key": "start_date",
                   "value": "2024-01-01",
-                  "description": "Filter from date (YYYY-MM-DD)",
+                  "description": "Filter from date (YYYY-MM-DD) - returns leaves that overlap with date range",
                   "disabled": true
                 },
                 {
-                  "key": "to",
+                  "key": "end_date",
                   "value": "2024-12-31",
-                  "description": "Filter to date (YYYY-MM-DD)",
+                  "description": "Filter to date (YYYY-MM-DD) - returns leaves that overlap with date range",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "description": "Filter by status: PENDING, APPROVED, REJECTED, CANCELLED",
                   "disabled": true
                 }
               ]
             },
-            "description": "Get pending leave requests for team"
+            "description": "Get leave details for a specific employee reporting to a manager"
+          }
+        },
+        {
+          "name": "Get Leaves for Team",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/managers/{{managerEmpId}}/employees/leaves?start_date={{start_date}}&end_date={{end_date}}&status={{status}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "managers",
+                "{{managerEmpId}}",
+                "employees",
+                "leaves"
+              ],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2024-01-01",
+                  "description": "Filter from date (YYYY-MM-DD) - returns leaves that overlap with date range",
+                  "disabled": true
+                },
+                {
+                  "key": "end_date",
+                  "value": "2024-12-31",
+                  "description": "Filter to date (YYYY-MM-DD) - returns leaves that overlap with date range",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING",
+                  "description": "Filter by status: PENDING, APPROVED, REJECTED, CANCELLED",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get leave details for all employees reporting to a manager"
           }
         },
         {
@@ -5269,6 +5236,31 @@
           }
         },
         {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{username}}/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{username}}",
+                "profile"
+              ],
+              "query": []
+            },
+            "description": "Get comprehensive user profile with user details, employee information, and role details"
+          }
+        },
+        {
           "name": "Get User by Username",
           "request": {
             "method": "GET",
@@ -5333,13 +5325,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{empid}}",
+              "raw": "{{baseUrl}}/users/{{username}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{empid}}"
+                "{{username}}"
               ],
               "query": []
             },
@@ -5365,13 +5357,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{empid}}",
+              "raw": "{{baseUrl}}/users/{{username}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{empid}}"
+                "{{username}}"
               ],
               "query": []
             }
@@ -5388,13 +5380,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{empid}}/roles",
+              "raw": "{{baseUrl}}/users/{{username}}/roles",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{empid}}",
+                "{{username}}",
                 "roles"
               ],
               "query": []
@@ -5421,13 +5413,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/{{empid}}/roles/{{roleid}}",
+              "raw": "{{baseUrl}}/users/{{username}}/roles/{{roleid}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "users",
-                "{{empid}}",
+                "{{username}}",
                 "roles",
                 "{{roleid}}"
               ],
@@ -5676,6 +5668,30 @@
     {
       "name": "Admin",
       "item": [
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "dashboard"
+              ],
+              "query": []
+            },
+            "description": "Get admin dashboard summary with user statistics, department count, location count, system health, and hourly logged-in users summary"
+          }
+        },
         {
           "name": "Get All Employees (Admin)",
           "request": {
