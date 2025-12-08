@@ -246,11 +246,79 @@ function getEmployeeFilterClause(userEmpId, userRoles, tableAlias = "e") {
   };
 }
 
+/**
+ * BOLA Middleware for Leave Access
+ * Checks if user has permission to access a leave by looking up the leave's employee
+ * and verifying access to that employee.
+ *
+ * Security Sequence: This should run AFTER authentication but BEFORE validation
+ *
+ * @param {string} leaveIdParam - Parameter name for leave ID (default: 'id')
+ * @returns {function} Express middleware function
+ */
+function authorizeLeaveAccess(leaveIdParam = "id") {
+  return async (req, res, next) => {
+    try {
+      // Ensure user is authenticated (should be set by authenticateJWT middleware)
+      if (!req.user || !req.user.empid) {
+        throw ApiError.unauthorized("User not authenticated");
+      }
+
+      const userEmpId = req.user.empid;
+      const userRoles = req.user.roles || [];
+      const leaveId = req.params[leaveIdParam];
+
+      if (!leaveId) {
+        throw ApiError.badRequest("Leave ID is required");
+      }
+
+      // Get the leave to find the employee it belongs to
+      const [[leave]] = await pool.query(
+        "SELECT empid FROM leaves WHERE id = ?",
+        [leaveId]
+      );
+
+      if (!leave) {
+        // Return 404 instead of 403 to avoid information disclosure
+        throw ApiError.notFound("Leave not found");
+      }
+
+      const leaveEmpId = leave.empid;
+
+      // Check if user has access to this employee's records
+      const hasAccess = await checkEmployeeAccess(
+        userEmpId,
+        userRoles,
+        leaveEmpId
+      );
+
+      if (!hasAccess) {
+        throw ApiError.forbidden(
+          "You do not have permission to access this leave"
+        );
+      }
+
+      // Access granted, continue to next middleware/route handler
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+/**
+ * Default BOLA middleware for leave routes
+ * Checks req.params.id by default
+ */
+const authorizeLeave = authorizeLeaveAccess("id");
+
 module.exports = {
   authorizeEmployeeAccess,
   authorizeEmployee,
   authorizeEmployeeQuery,
   authorizeEmployeeBody,
+  authorizeLeaveAccess, // BOLA middleware factory for leaves
+  authorizeLeave, // Default BOLA middleware for leave routes
   checkEmployeeAccess, // Export for use in route handlers if needed
   getEmployeeFilterClause, // Export for filtering employee lists
   requireRoles, // Generic role requirement middleware

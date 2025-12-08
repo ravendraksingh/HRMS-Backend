@@ -31,8 +31,10 @@ const logger = require("../../util/logger");
  * Returns: Check-in record with late status
  * Requires: User can only clock in for themselves (USER role) or their direct reports (MANAGER role)
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.post(
   "/:empid/attendance/clockin",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     body("attendance_date")
@@ -50,7 +52,6 @@ router.post(
     body("shiftid").optional().trim(),
   ],
   handleValidationErrors,
-  authorizeEmployee,
   async (req, res, next) => {
     const { empid } = req.params;
     const { attendance_date, check_in_time, shiftid } = req.body;
@@ -216,8 +217,10 @@ function calculateTotalWorkHours(
  * Returns: Check-out record with early leave status and total work hours
  * Requires: User can only clock out for themselves (USER role) or their direct reports (MANAGER role)
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.post(
   "/:empid/attendance/clockout",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     body("attendance_date")
@@ -234,7 +237,6 @@ router.post(
       .withMessage("check_out_time must be a valid ISO 8601 datetime"),
   ],
   handleValidationErrors,
-  authorizeEmployee,
   async (req, res, next) => {
     const { empid } = req.params;
     const { attendance_date, check_out_time } = req.body;
@@ -338,8 +340,10 @@ router.post(
  *   - Employee is not on approved leave today
  * Format: { empid, date, is_working_day, reason, type, holiday, attendance }
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.get(
   "/:empid/attendance/today",
+  authorizeEmployee, // BOLA check first
   [empidParamValidator],
   handleValidationErrors,
   async (req, res, next) => {
@@ -560,8 +564,10 @@ router.get(
  * Get attendance records for an employee within a date range
  * Query params: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD)
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.get(
   "/:empid/attendance",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     query("start_date")
@@ -656,11 +662,12 @@ router.get(
  * Returns: Created correction request
  * Requires: User can only create correction requests for themselves (USER role) or their direct reports (MANAGER role)
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.post(
   "/:empid/attendance/corrections",
+  authorizeEmployee, // BOLA check first
   createCorrectionRequestSchema,
   handleValidationErrors,
-  authorizeEmployee,
   async (req, res, next) => {
     const { empid } = req.params;
     const {
@@ -769,8 +776,10 @@ router.post(
  * Query params: status (optional), from_date (optional), to_date (optional)
  * Returns: List of correction requests for the employee
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.get(
   "/:empid/attendance/corrections",
+  authorizeEmployee, // BOLA check first
   getCorrectionRequestsQuerySchema,
   handleValidationErrors,
   async (req, res, next) => {
@@ -848,8 +857,10 @@ router.get(
  * 3. Do not include future dates and keep this within current month
  * Returns: List of eligible dates with their details
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.get(
   "/:empid/attendance/corrections/eligible-dates",
+  authorizeEmployee, // BOLA check first
   [empidParamValidator],
   handleValidationErrors,
   async (req, res, next) => {
@@ -1100,8 +1111,10 @@ router.get(
  * Returns: Success message
  * Requires: User can only cancel their own correction requests (USER role) or their direct reports' requests (MANAGER role)
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.post(
   "/:empid/attendance/corrections/:id/cancel",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     param("id")
@@ -1110,7 +1123,6 @@ router.post(
       .toInt(),
   ],
   handleValidationErrors,
-  authorizeEmployee,
   async (req, res, next) => {
     const { empid, id } = req.params;
 
@@ -1167,8 +1179,10 @@ router.post(
  * Query params: month (required, YYYY-MM format, e.g., 2024-12)
  * Returns: Aggregated statistics for the month
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.get(
   "/:empid/attendance/monthly",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     query("month")
@@ -1284,8 +1298,10 @@ router.get(
  * Query params: from_date (optional), to_date (optional), status (optional)
  * Returns: List of overtime records for the employee
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.get(
   "/:empid/attendance/overtime",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     query("from_date")
@@ -1372,8 +1388,10 @@ router.get(
  * Returns: Created overtime record ID
  * Requires: User can only create overtime requests for themselves (USER role) or their direct reports (MANAGER role)
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.post(
   "/:empid/attendance/overtime",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     body("overtime_date")
@@ -1456,8 +1474,10 @@ router.post(
  * Returns: Success message
  * Requires: User can only update their own overtime records (USER role) or their direct reports' records (MANAGER role)
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.patch(
   "/:empid/attendance/overtime/:id",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     param("id")
@@ -1587,8 +1607,10 @@ router.patch(
  *   - Leave records for each day
  * Note: Maximum date range is 31 days
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.get(
   "/:empid/calendar/attendance",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     query("start_date")
@@ -1915,8 +1937,10 @@ router.get(
  *   - Attendance records for each day
  *   - Leave records for each day
  */
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 router.get(
   "/:empid/calendar/attendance/monthly",
+  authorizeEmployee, // BOLA check first
   [
     empidParamValidator,
     query("month")

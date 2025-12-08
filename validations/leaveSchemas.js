@@ -132,6 +132,16 @@ const statusQueryValidator = query("status")
   .withMessage("status must be one of: PENDING, APPROVED, REJECTED, CANCELLED");
 
 /**
+ * Leave ID param validator
+ */
+const leaveIdParamValidator = param("id")
+  .notEmpty()
+  .withMessage("Leave ID is required")
+  .isInt({ min: 1 })
+  .withMessage("Leave ID must be a positive integer")
+  .toInt();
+
+/**
  * Date range validation (custom validator for body)
  */
 const dateRangeValidator = body().custom((value, { req }) => {
@@ -174,7 +184,40 @@ const createLeaveSchema = [
 ];
 
 /**
- * Schema for updating a leave (PATCH)
+ * Schema for updating a leave (PATCH) - for /leaves/:id route
+ */
+const updateLeaveByIdSchema = [
+  leaveIdParamValidator,
+  startDateValidator(false),
+  endDateValidator(false),
+  leavetypeIdValidator.optional(),
+  reasonValidator,
+  medicalCertificateUrlValidator,
+  dateRangeValidator,
+  // Custom validation: ensure at least one field is provided for update
+  body().custom((value, { req }) => {
+    const {
+      start_date,
+      end_date,
+      leavetype_id,
+      reason,
+      medical_certificate_url,
+    } = req.body;
+    if (
+      start_date === undefined &&
+      end_date === undefined &&
+      leavetype_id === undefined &&
+      reason === undefined &&
+      medical_certificate_url === undefined
+    ) {
+      throw new Error("At least one field must be provided for update");
+    }
+    return true;
+  }),
+];
+
+/**
+ * Schema for updating a leave (PATCH) - for /employees/:empid/leaves route
  */
 const updateLeaveSchema = [
   empidParamValidator,
@@ -206,9 +249,31 @@ const updateLeaveSchema = [
   }),
 ];
 
+/**
+ * Schema for approving a leave
+ */
+const approveLeaveSchema = [
+  leaveIdParamValidator,
+  body("approved_by").notEmpty().withMessage("approved_by is required").trim(),
+];
+
+/**
+ * Schema for rejecting a leave
+ */
+const rejectLeaveSchema = [
+  leaveIdParamValidator,
+  body("approved_by").notEmpty().withMessage("approved_by is required").trim(),
+  body("rejection_reason")
+    .optional()
+    .isLength({ max: 500 })
+    .withMessage("rejection_reason must be 500 characters or less")
+    .trim(),
+];
+
 module.exports = {
   // Individual validators
   empidParamValidator,
+  leaveIdParamValidator,
   startDateValidator,
   endDateValidator,
   startDateQueryValidator,
@@ -222,4 +287,7 @@ module.exports = {
   getLeavesQuerySchema,
   createLeaveSchema,
   updateLeaveSchema,
+  updateLeaveByIdSchema,
+  approveLeaveSchema,
+  rejectLeaveSchema,
 };

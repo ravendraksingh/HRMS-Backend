@@ -114,10 +114,10 @@ A comprehensive Human Resource Management System (HRMS) backend built with Node.
    ```bash
    # Generate JWT_SECRET (32 bytes = 64 hex characters)
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-   
+
    # Generate TOKEN_SECRET (32 bytes = 64 hex characters)
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-   
+
    # Generate ENCRYPTION_KEY (32 bytes = 64 hex characters for AES-256)
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```

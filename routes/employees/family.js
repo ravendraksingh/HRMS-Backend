@@ -9,12 +9,15 @@ const {
 } = require("../../validations/employeeSchemas");
 const { handleValidationErrors } = require("../../util/validation");
 const { param } = require("express-validator");
+const { authorizeEmployee } = require("../../middlewares/rbac");
 const { encryptPIIFields, decryptPIIFields } = require("../../util/encryption");
 const { PII_FIELDS } = require("../../config/piiFields");
 
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 // Get family and dependents for an employee
 router.get(
   "/:empid/family",
+  authorizeEmployee, // BOLA check first
   [param("empid").notEmpty().trim()],
   handleValidationErrors,
   async (req, res, next) => {
@@ -31,12 +34,12 @@ router.get(
         "SELECT * FROM employee_family_dependents WHERE empid = ? ORDER BY id DESC",
         [empid]
       );
-      
+
       // Decrypt PII fields before sending response
-      const decryptedFamily = rows.map(row => 
+      const decryptedFamily = rows.map((row) =>
         decryptPIIFields(row, PII_FIELDS.employee_family_dependents)
       );
-      
+
       res.json({ family: decryptedFamily });
     } catch (err) {
       next(err);
@@ -44,9 +47,11 @@ router.get(
   }
 );
 
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 // Create family/dependent record
 router.post(
   "/:empid/family",
+  authorizeEmployee, // BOLA check first
   createFamilySchema,
   handleValidationErrors,
   async (req, res, next) => {
@@ -156,9 +161,11 @@ router.post(
   }
 );
 
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 // Update family/dependent record
 router.patch(
   "/:empid/family/:id",
+  authorizeEmployee, // BOLA check first
   updateFamilySchema,
   handleValidationErrors,
   async (req, res, next) => {
@@ -349,9 +356,11 @@ router.patch(
   }
 );
 
+// Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
 // Delete family/dependent record
 router.delete(
   "/:empid/family/:id",
+  authorizeEmployee, // BOLA check first
   [
     param("empid").notEmpty().trim(),
     param("id")

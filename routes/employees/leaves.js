@@ -4,12 +4,16 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../../db");
 const ApiError = require("../../errors/ApiError");
-const { SELECT_EMPLOYEE_EXISTS, SELECT_EMPLOYEE_NAME } = require("../../queries/employees");
+const {
+  SELECT_EMPLOYEE_EXISTS,
+  SELECT_EMPLOYEE_NAME,
+} = require("../../queries/employees");
 const {
   getLeavesQuerySchema,
   createLeaveSchema,
 } = require("../../validations/leaveSchemas");
 const { handleValidationErrors } = require("../../util/validation");
+const { authorizeEmployee } = require("../../middlewares/rbac");
 
 /**
  * GET /employees/:empid/leaves
@@ -18,21 +22,20 @@ const { handleValidationErrors } = require("../../util/validation");
  * Returns: List of leaves for the employee
  *   - If start_date and end_date are provided: returns leaves that overlap with the date range
  *   - If not provided: returns all leaves for the employee
+ * Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
  */
 router.get(
   "/:empid/leaves",
-//   getLeavesQuerySchema,
-//   handleValidationErrors,
+  authorizeEmployee, // BOLA check first
+  getLeavesQuerySchema,
+  handleValidationErrors,
   async (req, res, next) => {
     const { empid } = req.params;
     const { start_date, end_date, status } = req.query;
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        SELECT_EMPLOYEE_EXISTS,
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -106,9 +109,11 @@ router.get(
  * Create a new leave for an employee
  * Body: start_date, end_date, leavetype_id, reason (optional), medical_certificate_url (optional)
  * Returns: Created leave ID
+ * Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
  */
 router.post(
   "/:empid/leaves",
+  authorizeEmployee, // BOLA check first
   createLeaveSchema,
   handleValidationErrors,
   async (req, res, next) => {
@@ -123,10 +128,7 @@ router.post(
 
     try {
       // Validate employee exists
-      const [[employee]] = await pool.query(
-        SELECT_EMPLOYEE_EXISTS,
-        [empid]
-      );
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_EXISTS, [empid]);
 
       if (!employee) {
         throw new ApiError("Employee not found", 404);
@@ -177,36 +179,37 @@ router.post(
  * Get yearly leave summary for an employee
  * Query params: year (optional, defaults to current year)
  * Returns: Yearly leave summary with balances, usage, and statistics
+ * Security sequence: Authentication (global) → BOLA → Validation → Business Logic → DB
  */
-router.get("/:empid/leaves/summary/yearly", async (req, res, next) => {
-  const { empid } = req.params;
-  const { year } = req.query;
+router.get(
+  "/:empid/leaves/summary/yearly",
+  authorizeEmployee, // BOLA check first
+  async (req, res, next) => {
+    const { empid } = req.params;
+    const { year } = req.query;
 
-  try {
-    // Validate employee exists
-    const [[employee]] = await pool.query(
-      SELECT_EMPLOYEE_NAME,
-      [empid]
-    );
+    try {
+      // Validate employee exists
+      const [[employee]] = await pool.query(SELECT_EMPLOYEE_NAME, [empid]);
 
-    if (!employee) {
-      throw new ApiError("Employee not found", 404);
-    }
+      if (!employee) {
+        throw new ApiError("Employee not found", 404);
+      }
 
-    // Use current year if not specified
-    const currentYear = year ? parseInt(year) : new Date().getFullYear();
+      // Use current year if not specified
+      const currentYear = year ? parseInt(year) : new Date().getFullYear();
 
-    // Validate year is a valid number
-    if (isNaN(currentYear) || currentYear < 2000 || currentYear > 2100) {
-      throw new ApiError(
-        "Invalid year. Year must be between 2000 and 2100",
-        400
-      );
-    }
+      // Validate year is a valid number
+      if (isNaN(currentYear) || currentYear < 2000 || currentYear > 2100) {
+        throw new ApiError(
+          "Invalid year. Year must be between 2000 and 2100",
+          400
+        );
+      }
 
-    // Get leave balances for the year
-    const [leaveBalances] = await pool.query(
-      `SELECT 
+      // Get leave balances for the year
+      const [leaveBalances] = await pool.query(
+        `SELECT 
         lb.leavetype_id,
         lb.current_balance,
         lb.opening_balance,
@@ -219,12 +222,12 @@ router.get("/:empid/leaves/summary/yearly", async (req, res, next) => {
       LEFT JOIN leave_types lt ON lb.leavetype_id = lt.leavetype_id
       WHERE lb.empid = ? AND lb.year = ?
       ORDER BY lt.name`,
-      [empid, currentYear]
-    );
+        [empid, currentYear]
+      );
 
-    // Get all leaves for the year grouped by status and leave type
-    const [leavesByStatus] = await pool.query(
-      `SELECT 
+      // Get all leaves for the year grouped by status and leave type
+      const [leavesByStatus] = await pool.query(
+        `SELECT 
         leavetype_id,
         status,
         SUM(total_days) as total_days,
@@ -233,12 +236,12 @@ router.get("/:empid/leaves/summary/yearly", async (req, res, next) => {
       WHERE empid = ? 
         AND YEAR(start_date) = ?
       GROUP BY leavetype_id, status`,
-      [empid, currentYear]
-    );
+        [empid, currentYear]
+      );
 
-    // Get monthly breakdown of leaves
-    const [monthlyLeaves] = await pool.query(
-      `SELECT 
+      // Get monthly breakdown of leaves
+      const [monthlyLeaves] = await pool.query(
+        `SELECT 
         MONTH(start_date) as month,
         leavetype_id,
         SUM(total_days) as total_days,
@@ -249,165 +252,168 @@ router.get("/:empid/leaves/summary/yearly", async (req, res, next) => {
         AND status = 'APPROVED'
       GROUP BY MONTH(start_date), leavetype_id
       ORDER BY month, leavetype_id`,
-      [empid, currentYear]
-    );
+        [empid, currentYear]
+      );
 
-    // Create maps for quick lookup
-    const leavesByStatusMap = new Map();
-    leavesByStatus.forEach((item) => {
-      const key = `${item.leavetype_id}_${item.status}`;
-      leavesByStatusMap.set(key, {
-        total_days: parseFloat(item.total_days) || 0,
-        leave_count: item.leave_count || 0,
+      // Create maps for quick lookup
+      const leavesByStatusMap = new Map();
+      leavesByStatus.forEach((item) => {
+        const key = `${item.leavetype_id}_${item.status}`;
+        leavesByStatusMap.set(key, {
+          total_days: parseFloat(item.total_days) || 0,
+          leave_count: item.leave_count || 0,
+        });
       });
-    });
 
-    // Build monthly breakdown map
-    const monthlyMap = new Map();
-    monthlyLeaves.forEach((item) => {
-      const key = `${item.month}_${item.leavetype_id}`;
-      monthlyMap.set(key, {
-        total_days: parseFloat(item.total_days) || 0,
-        leave_count: item.leave_count || 0,
+      // Build monthly breakdown map
+      const monthlyMap = new Map();
+      monthlyLeaves.forEach((item) => {
+        const key = `${item.month}_${item.leavetype_id}`;
+        monthlyMap.set(key, {
+          total_days: parseFloat(item.total_days) || 0,
+          leave_count: item.leave_count || 0,
+        });
       });
-    });
 
-    // Build summary by leave type
-    const summaryByType = leaveBalances.map((balance) => {
-      const leavetype_id = balance.leavetype_id;
+      // Build summary by leave type
+      const summaryByType = leaveBalances.map((balance) => {
+        const leavetype_id = balance.leavetype_id;
 
-      const approved = leavesByStatusMap.get(`${leavetype_id}_APPROVED`) || {
-        total_days: 0,
-        leave_count: 0,
-      };
-      const pending = leavesByStatusMap.get(`${leavetype_id}_PENDING`) || {
-        total_days: 0,
-        leave_count: 0,
-      };
-      const rejected = leavesByStatusMap.get(`${leavetype_id}_REJECTED`) || {
-        total_days: 0,
-        leave_count: 0,
-      };
-      const cancelled = leavesByStatusMap.get(`${leavetype_id}_CANCELLED`) || {
-        total_days: 0,
-        leave_count: 0,
-      };
-
-      // Build monthly breakdown for this leave type
-      const monthlyBreakdown = [];
-      for (let month = 1; month <= 12; month++) {
-        const monthlyData = monthlyMap.get(`${month}_${leavetype_id}`) || {
+        const approved = leavesByStatusMap.get(`${leavetype_id}_APPROVED`) || {
           total_days: 0,
           leave_count: 0,
         };
-        monthlyBreakdown.push({
-          month: month,
-          month_name: new Date(currentYear, month - 1, 1).toLocaleString(
-            "default",
-            { month: "long" }
-          ),
-          total_days: monthlyData.total_days,
-          leave_count: monthlyData.leave_count,
-        });
-      }
+        const pending = leavesByStatusMap.get(`${leavetype_id}_PENDING`) || {
+          total_days: 0,
+          leave_count: 0,
+        };
+        const rejected = leavesByStatusMap.get(`${leavetype_id}_REJECTED`) || {
+          total_days: 0,
+          leave_count: 0,
+        };
+        const cancelled = leavesByStatusMap.get(
+          `${leavetype_id}_CANCELLED`
+        ) || {
+          total_days: 0,
+          leave_count: 0,
+        };
 
-      return {
-        leavetype_id: leavetype_id,
-        leave_type_name: balance.leave_type_name,
-        max_leaves_per_year: balance.max_leaves_per_year,
-        opening_balance: parseFloat(balance.opening_balance) || 0,
-        earned: parseFloat(balance.earned_leaves) || 0,
-        used: parseFloat(balance.used_leaves) || 0,
-        carry_forward: parseFloat(balance.carry_forward_balance) || 0,
-        current_balance: parseFloat(balance.current_balance) || 0,
+        // Build monthly breakdown for this leave type
+        const monthlyBreakdown = [];
+        for (let month = 1; month <= 12; month++) {
+          const monthlyData = monthlyMap.get(`${month}_${leavetype_id}`) || {
+            total_days: 0,
+            leave_count: 0,
+          };
+          monthlyBreakdown.push({
+            month: month,
+            month_name: new Date(currentYear, month - 1, 1).toLocaleString(
+              "default",
+              { month: "long" }
+            ),
+            total_days: monthlyData.total_days,
+            leave_count: monthlyData.leave_count,
+          });
+        }
+
+        return {
+          leavetype_id: leavetype_id,
+          leave_type_name: balance.leave_type_name,
+          max_leaves_per_year: balance.max_leaves_per_year,
+          opening_balance: parseFloat(balance.opening_balance) || 0,
+          earned: parseFloat(balance.earned_leaves) || 0,
+          used: parseFloat(balance.used_leaves) || 0,
+          carry_forward: parseFloat(balance.carry_forward_balance) || 0,
+          current_balance: parseFloat(balance.current_balance) || 0,
+          approved: {
+            total_days: approved.total_days,
+            leave_count: approved.leave_count,
+          },
+          pending: {
+            total_days: pending.total_days,
+            leave_count: pending.leave_count,
+          },
+          rejected: {
+            total_days: rejected.total_days,
+            leave_count: rejected.leave_count,
+          },
+          cancelled: {
+            total_days: cancelled.total_days,
+            leave_count: cancelled.leave_count,
+          },
+          monthly_breakdown: monthlyBreakdown,
+        };
+      });
+
+      // Calculate yearly totals
+      const totals = {
+        opening_balance: summaryByType.reduce(
+          (sum, item) => sum + item.opening_balance,
+          0
+        ),
+        earned: summaryByType.reduce((sum, item) => sum + item.earned, 0),
+        used: summaryByType.reduce((sum, item) => sum + item.used, 0),
+        carry_forward: summaryByType.reduce(
+          (sum, item) => sum + item.carry_forward,
+          0
+        ),
+        current_balance: summaryByType.reduce(
+          (sum, item) => sum + item.current_balance,
+          0
+        ),
         approved: {
-          total_days: approved.total_days,
-          leave_count: approved.leave_count,
+          total_days: summaryByType.reduce(
+            (sum, item) => sum + item.approved.total_days,
+            0
+          ),
+          leave_count: summaryByType.reduce(
+            (sum, item) => sum + item.approved.leave_count,
+            0
+          ),
         },
         pending: {
-          total_days: pending.total_days,
-          leave_count: pending.leave_count,
+          total_days: summaryByType.reduce(
+            (sum, item) => sum + item.pending.total_days,
+            0
+          ),
+          leave_count: summaryByType.reduce(
+            (sum, item) => sum + item.pending.leave_count,
+            0
+          ),
         },
         rejected: {
-          total_days: rejected.total_days,
-          leave_count: rejected.leave_count,
+          total_days: summaryByType.reduce(
+            (sum, item) => sum + item.rejected.total_days,
+            0
+          ),
+          leave_count: summaryByType.reduce(
+            (sum, item) => sum + item.rejected.leave_count,
+            0
+          ),
         },
         cancelled: {
-          total_days: cancelled.total_days,
-          leave_count: cancelled.leave_count,
+          total_days: summaryByType.reduce(
+            (sum, item) => sum + item.cancelled.total_days,
+            0
+          ),
+          leave_count: summaryByType.reduce(
+            (sum, item) => sum + item.cancelled.leave_count,
+            0
+          ),
         },
-        monthly_breakdown: monthlyBreakdown,
       };
-    });
 
-    // Calculate yearly totals
-    const totals = {
-      opening_balance: summaryByType.reduce(
-        (sum, item) => sum + item.opening_balance,
-        0
-      ),
-      earned: summaryByType.reduce((sum, item) => sum + item.earned, 0),
-      used: summaryByType.reduce((sum, item) => sum + item.used, 0),
-      carry_forward: summaryByType.reduce(
-        (sum, item) => sum + item.carry_forward,
-        0
-      ),
-      current_balance: summaryByType.reduce(
-        (sum, item) => sum + item.current_balance,
-        0
-      ),
-      approved: {
-        total_days: summaryByType.reduce(
-          (sum, item) => sum + item.approved.total_days,
-          0
-        ),
-        leave_count: summaryByType.reduce(
-          (sum, item) => sum + item.approved.leave_count,
-          0
-        ),
-      },
-      pending: {
-        total_days: summaryByType.reduce(
-          (sum, item) => sum + item.pending.total_days,
-          0
-        ),
-        leave_count: summaryByType.reduce(
-          (sum, item) => sum + item.pending.leave_count,
-          0
-        ),
-      },
-      rejected: {
-        total_days: summaryByType.reduce(
-          (sum, item) => sum + item.rejected.total_days,
-          0
-        ),
-        leave_count: summaryByType.reduce(
-          (sum, item) => sum + item.rejected.leave_count,
-          0
-        ),
-      },
-      cancelled: {
-        total_days: summaryByType.reduce(
-          (sum, item) => sum + item.cancelled.total_days,
-          0
-        ),
-        leave_count: summaryByType.reduce(
-          (sum, item) => sum + item.cancelled.leave_count,
-          0
-        ),
-      },
-    };
-
-    res.json({
-      empid: empid,
-      employee_name: employee.name,
-      year: currentYear,
-      summary_by_type: summaryByType,
-      totals: totals,
-    });
-  } catch (err) {
-    next(err);
+      res.json({
+        empid: empid,
+        employee_name: employee.name,
+        year: currentYear,
+        summary_by_type: summaryByType,
+        totals: totals,
+      });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 module.exports = router;
